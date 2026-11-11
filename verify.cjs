@@ -80,11 +80,19 @@ const css = read('style.css');
 const preview = read('preview.html');
 const manifest = JSON.parse(read('manifest.json'));
 
-assert.equal(manifest.version, '1.1.0');
+assert.equal(manifest.version, '1.2.0');
 assert.equal(manifest.auto_update, false);
+assert.match(indexSource, /v1\.2\.0 ready/);
 assert.equal((indexSource.match(/data-view="(?:gallery|create|settings)"/g) || []).length, 3, 'exactly three primary tabs');
 assert.match(indexSource, /data-mode="write"/);
 assert.match(indexSource, /data-mode="generate"/);
+assert.match(indexSource, /create-inline-subject/);
+assert.match(indexSource, /create-inline-tag/);
+assert.match(indexSource, /Добавить и выбрать/);
+assert.match(indexSource, /Новый черновик/);
+assert.match(indexSource, /Как подготовить описание/);
+assert.doesNotMatch(indexSource, /openNameColorEditor/);
+assert.doesNotMatch(indexSource, /POPUP_TYPE\.INPUT/);
 assert.match(indexSource, /GALLERY_FIRST = 48/);
 assert.match(indexSource, /IntersectionObserver/);
 assert.match(indexSource, /loading="lazy"/);
@@ -111,10 +119,14 @@ assert.match(css, /env\(safe-area-inset/);
 assert.match(css, /100dvh/);
 assert.match(css, /repeat\(auto-fit, minmax\(138px, 1fr\)\)/);
 assert.match(css, /max-width: 280px/);
+assert.match(css, /\.nw-mode-switch \.menu_button\.active/);
+assert.match(css, /\.nw-inline-creator/);
 assert.equal((preview.match(/data-preview-tab=/g) || []).length, 3, 'preview exposes all three tabs');
 assert.match(preview, /data-preview-mode="write"/);
 assert.match(preview, /data-preview-mode="generate"/);
 assert.match(preview, /Подключение к модели/);
+assert.match(preview, /data-preview-create-subject/);
+assert.match(preview, /data-preview-create-tag/);
 assert.match(preview, /addEventListener\('click'/);
 
 (async () => {

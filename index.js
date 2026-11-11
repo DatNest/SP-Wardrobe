@@ -57,6 +57,8 @@ const ui = {
     galleryOffset: 0,
     createMode: 'write',
     draft: null,
+    subjectCreator: null,
+    tagCreator: null,
     generator: { target: '', wishes: '', avoid: '' },
     undo: null,
     status: '',
@@ -310,7 +312,48 @@ function ensureDraft() {
     return ui.draft;
 }
 
+function captureInlineCreators() {
+    if (ui.subjectCreator) {
+        const name = document.getElementById('nw-inline-subject-name');
+        const type = document.getElementById('nw-inline-subject-type');
+        const color = document.getElementById('nw-inline-subject-color');
+        if (name) ui.subjectCreator.name = name.value;
+        if (type) ui.subjectCreator.type = type.value === 'persona' ? 'persona' : 'character';
+        if (color) ui.subjectCreator.color = color.value;
+    }
+    if (ui.tagCreator) {
+        const name = document.getElementById('nw-inline-tag-name');
+        const color = document.getElementById('nw-inline-tag-color');
+        if (name) ui.tagCreator.name = name.value;
+        if (color) ui.tagCreator.color = color.value;
+    }
+}
+
+function inlineSubjectCreatorHtml() {
+    const editor = ui.subjectCreator;
+    if (!editor) return '';
+    return `<section class="settingsSectionWrap nw-inline-creator" aria-label="Создание персоны или персонажа">
+        <div class="nw-inline-creator-head"><div><small>${editor.assignToDraft ? 'Новая привязка для наряда' : 'Новая запись библиотеки'}</small><strong>Добавить персону или персонажа</strong></div><button class="menu_button fa-fw" data-action="cancel-inline-subject" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button></div>
+        <div class="nw-settings-grid"><label><span>Имя</span><input id="nw-inline-subject-name" class="text_pole" maxlength="120" placeholder="Например: Зуко" value="${escapeHtml(editor.name)}"></label><label><span>Кто это</span><select id="nw-inline-subject-type" class="text_pole"><option value="character" ${editor.type === 'character' ? 'selected' : ''}>Персонаж или NPC ◆</option><option value="persona" ${editor.type === 'persona' ? 'selected' : ''}>Персона пользователя ●</option></select></label><label class="nw-color-field"><span>Цвет метки</span><input id="nw-inline-subject-color" type="color" value="${escapeHtml(editor.color)}"></label></div>
+        <div class="nw-aliases"><small>Другие имена <span>необязательно</span></small><div class="nw-alias-chips">${editor.aliases.map(alias => `<button class="menu_button nw-alias-chip" data-action="remove-inline-alias" data-alias="${escapeHtml(alias)}">${escapeHtml(alias)} <i class="fa-solid fa-xmark"></i></button>`).join('')}<input id="nw-inline-alias-input" class="text_pole nw-alias-input" placeholder="Введи имя и нажми Enter"></div></div>
+        <div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="create-inline-subject"><i class="fa-solid fa-plus"></i><span>${editor.assignToDraft ? 'Добавить и выбрать' : 'Создать'}</span></button><button class="menu_button" data-action="cancel-inline-subject">Отмена</button></div>
+        <div class="nw-message" role="status">${escapeHtml(editor.error || '')}</div>
+    </section>`;
+}
+
+function inlineTagCreatorHtml() {
+    const editor = ui.tagCreator;
+    if (!editor) return '';
+    return `<section class="settingsSectionWrap nw-inline-creator nw-inline-tag-creator" aria-label="Создание тега">
+        <div class="nw-inline-creator-head"><div><small>Новая метка</small><strong>Создать тег</strong></div><button class="menu_button fa-fw" data-action="cancel-inline-tag" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button></div>
+        <div class="nw-inline-tag-fields"><label><span>Название</span><input id="nw-inline-tag-name" class="text_pole" maxlength="120" placeholder="Например: Дорожное" value="${escapeHtml(editor.name)}"></label><label class="nw-color-field"><span>Цвет</span><input id="nw-inline-tag-color" type="color" value="${escapeHtml(editor.color)}"></label></div>
+        <div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="create-inline-tag"><i class="fa-solid fa-plus"></i><span>${editor.assignToDraft ? 'Создать и выбрать' : 'Создать'}</span></button><button class="menu_button" data-action="cancel-inline-tag">Отмена</button></div>
+        <div class="nw-message" role="status">${escapeHtml(editor.error || '')}</div>
+    </section>`;
+}
+
 function captureDraft() {
+    captureInlineCreators();
     if (ui.view !== 'create' || !ui.draft) return;
     const name = document.getElementById('nw-outfit-name');
     const description = document.getElementById('nw-outfit-description');
@@ -340,13 +383,14 @@ function createViewHtml() {
         <button class="menu_button menu_button_icon" data-action="generate-outfit"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать описание</span></button>
         <div id="nw-generation-status" class="nw-message" role="status" aria-live="polite"></div>
     </section>` : '<p class="nw-help">Заполни описание вручную. Оно будет вставляться в найденную группу одежды без дополнительных изменений.</p>';
-    return `<section class="nw-create-head"><div class="nw-mode-switch" role="group" aria-label="Способ создания"><button class="menu_button${ui.createMode === 'write' ? ' active' : ''}" data-action="create-mode" data-mode="write">Написать</button><button class="menu_button${ui.createMode === 'generate' ? ' active' : ''}" data-action="create-mode" data-mode="generate">Сгенерировать</button></div><button class="menu_button fa-fw" data-action="reset-draft" title="Новый черновик" aria-label="Новый черновик"><i class="fa-solid fa-file-circle-plus"></i></button></section>
+    return `<section class="nw-create-head"><div class="nw-create-method"><small>Как подготовить описание</small><div class="nw-mode-switch" role="group" aria-label="Способ создания"><button class="menu_button${ui.createMode === 'write' ? ' active' : ''}" data-action="create-mode" data-mode="write" aria-pressed="${ui.createMode === 'write'}"><i class="fa-solid fa-pen"></i><span>Написать</span></button><button class="menu_button${ui.createMode === 'generate' ? ' active' : ''}" data-action="create-mode" data-mode="generate" aria-pressed="${ui.createMode === 'generate'}"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать</span></button></div></div><button class="menu_button menu_button_icon nw-new-draft" data-action="reset-draft"><i class="fa-solid fa-file-circle-plus"></i><span>Новый черновик</span></button></section>
         ${generate}
         <section class="nw-outfit-form">
             <label><span>Название</span><input id="nw-outfit-name" class="text_pole" maxlength="120" value="${escapeHtml(draft.name)}"></label>
-            <label><span>Персона или персонаж</span><div class="nw-field-row"><select id="nw-outfit-subject" class="text_pole"><option value="">Выбрать…</option>${subjects}</select><button class="menu_button fa-fw" data-action="quick-subject" title="Создать персону или персонажа" aria-label="Создать персону или персонажа"><i class="fa-solid fa-plus"></i></button></div></label>
+            <label><span>Для кого этот наряд</span><div class="nw-field-row"><select id="nw-outfit-subject" class="text_pole"><option value="">Выбрать персону или персонажа…</option>${subjects}</select><button class="menu_button menu_button_icon" data-action="quick-subject"><i class="fa-solid fa-user-plus"></i><span>Добавить</span></button></div></label>
+            ${inlineSubjectCreatorHtml()}
             <label><span>Описание одежды</span><textarea id="nw-outfit-description" class="text_pole" rows="7" maxlength="12000" placeholder="Текст, который будет вставлен в пост">${escapeHtml(draft.description)}</textarea></label>
-            <div><div class="nw-field-title"><span>Теги</span><button class="menu_button" data-action="new-tag">+ Новый тег</button></div><div class="nw-filter-strip nw-draft-tags">${tags || '<small>Создай первый тег кнопкой выше.</small>'}</div></div>
+            <div><div class="nw-field-title"><span>Теги</span><button class="menu_button" data-action="new-tag">+ Создать тег</button></div>${inlineTagCreatorHtml()}<div class="nw-filter-strip nw-draft-tags">${tags || '<small>Создай первый тег кнопкой выше.</small>'}</div></div>
             <div><div class="nw-field-title"><span>Обложка и шоукейс</span><small>${draft.images.length}/3</small></div><div class="nw-image-list">${images || '<small>Первое изображение станет обложкой карточки.</small>'}</div><label class="menu_button nw-file-button${draft.images.length >= 3 ? ' disabled' : ''}"><i class="fa-solid fa-image"></i><span>Добавить изображения</span><input id="nw-image-files" type="file" accept="image/*" multiple hidden ${draft.images.length >= 3 ? 'disabled' : ''}></label><div id="nw-image-status" class="nw-message" role="status" aria-live="polite"></div></div>
             <div class="nw-form-actions"><button class="menu_button menu_button_icon" data-action="save-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить наряд</span></button>${settings.outfits.some(outfit => outfit.id === draft.id) ? '<button class="menu_button menu_button_icon" data-action="delete-outfit"><i class="fa-solid fa-trash"></i><span>Удалить</span></button>' : ''}</div>
         </section>`;
@@ -378,8 +422,8 @@ function connectionOptionsHtml() {
 function settingsViewHtml() {
     const rule = settings.regex;
     return `<div class="nw-settings-stack">
-        <details class="settingsSectionWrap" open><summary><strong>Персоны и персонажи</strong><small>${settings.subjects.length}</small></summary><div class="nw-details-body"><p class="nw-help"><b>Персонаж ◆</b> — герой или NPC. <b>Персона ●</b> — образ пользователя. Цвет помогает узнать их в фильтрах.</p><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div><div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></div></details>
-        <details class="settingsSectionWrap"><summary><strong>Обычные теги</strong><small>${settings.tags.length}</small></summary><div class="nw-details-body"><p class="nw-help">Например: зима, формальное, дорожное. Их цвет не попадает в описание одежды.</p><button class="menu_button" data-action="new-tag">+ Новый тег</button><div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></div></details>
+        <details class="settingsSectionWrap" open><summary><strong>Персоны и персонажи</strong><small>${settings.subjects.length}</small></summary><div class="nw-details-body"><p class="nw-help"><b>Персонаж ◆</b> — герой или NPC. <b>Персона ●</b> — образ пользователя. Цвет помогает узнать их в фильтрах.</p><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div>${inlineSubjectCreatorHtml()}<div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></div></details>
+        <details class="settingsSectionWrap" ${ui.tagCreator ? 'open' : ''}><summary><strong>Обычные теги</strong><small>${settings.tags.length}</small></summary><div class="nw-details-body"><p class="nw-help">Например: зима, формальное, дорожное. Их цвет не попадает в описание одежды.</p><button class="menu_button" data-action="new-tag">+ Создать тег</button>${inlineTagCreatorHtml()}<div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></div></details>
         <details class="settingsSectionWrap" open><summary><strong>Подключение к модели</strong><small>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</small></summary><div class="nw-details-body"><p class="nw-help">Один профиль сначала анализирует лорбук и два последних поста, затем создаёт наряд. Пресет основного чата не используется.</p><label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label><div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button" data-action="save-settings">Сохранить</button></div><div id="nw-connection-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div></div></details>
         <details class="settingsSectionWrap" open><summary><strong>Вставка в пост</strong></summary><div class="nw-details-body"><p class="nw-help">Правило должно содержать отдельную группу имени и отдельную группу одежды. Проверка читает последние посты, но ничего в них не меняет.</p><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="4" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов искать</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></div></details>
         <details class="settingsSectionWrap"><summary><strong>Промпт сканирования</strong></summary><div class="nw-details-body"><p class="nw-help">Первый запрос извлекает факты из лорбука и двух постов. Доступны: {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</p><textarea id="nw-scan-prompt" class="text_pole nw-code-field" rows="14" maxlength="20000">${escapeHtml(settings.prompts.scan)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-scan-prompt">Вернуть стандартный текст</button><button class="menu_button" data-action="save-settings">Сохранить</button></div></div></details>
@@ -523,38 +567,73 @@ async function testRegex() {
     }
 }
 
-async function openNameColorEditor(kind, type = null) {
-    const isTag = kind === 'tag';
-    const title = isTag ? 'Новый тег' : `Новая ${type === 'persona' ? 'персона' : 'персонаж'}`;
-    const colorId = `nw-popup-color-${Date.now()}`;
-    const popup = new Popup(`<h3>${title}</h3><small>${isTag ? 'Цвет будет использоваться только в интерфейсе.' : 'Другие варианты имени можно добавить после создания в настройках.'}</small>`, POPUP_TYPE.INPUT, '', {
-        rows: 1,
-        wide: false,
-        okButton: 'Создать',
-        cancelButton: 'Отмена',
-        customInputs: [{ id: colorId, label: 'Цвет', type: 'color', defaultState: isTag ? '#8a7aa5' : type === 'persona' ? '#7899a8' : '#9a765f' }],
-    });
-    const name = await popup.show();
-    if (typeof name !== 'string' || !normalizeName(name)) return null;
-    const color = normalizeColor(popup.inputResults?.get(colorId), isTag ? '#8a7aa5' : '#9a765f');
-    if (isTag) {
-        const tag = normalizeTag({ id: uid('tag'), name, color });
-        settings.tags.push(tag);
-        commitSettings();
-        notify(`Тег «${tag.name}» создан. Выбери его, чтобы назначить наряду.`);
-        return tag;
-    }
-    const subject = normalizeSubject({ id: uid('subject'), name, color, type });
-    settings.subjects.push(subject);
-    commitSettings();
-    return subject;
+function openInlineSubjectCreator(type = 'character', assignToDraft = false) {
+    captureDraft();
+    ui.subjectCreator = {
+        name: '',
+        type: type === 'persona' ? 'persona' : 'character',
+        color: type === 'persona' ? '#7899a8' : '#9a765f',
+        aliases: [],
+        assignToDraft,
+        error: '',
+    };
+    render();
+    requestAnimationFrame(() => document.getElementById('nw-inline-subject-name')?.focus());
 }
 
-async function quickSubjectChoice() {
+function openInlineTagCreator(assignToDraft = false) {
     captureDraft();
-    ui.view = 'settings';
+    ui.tagCreator = { name: '', color: '#8a7aa5', assignToDraft, error: '' };
     render();
-    notify('Выбери «+ Персонаж» или «+ Персона». Черновик наряда сохранён.');
+    requestAnimationFrame(() => document.getElementById('nw-inline-tag-name')?.focus());
+}
+
+function createInlineSubject() {
+    captureDraft();
+    const editor = ui.subjectCreator;
+    if (!editor) return;
+    const name = normalizeName(editor.name);
+    if (!name) {
+        editor.error = 'Заполни имя персоны или персонажа.';
+        render();
+        return;
+    }
+    if (settings.subjects.some(subject => comparableName(subject.name) === comparableName(name))) {
+        editor.error = 'Такое имя уже есть. Выбери существующую запись или добавь уточнение к имени.';
+        render();
+        return;
+    }
+    const subject = normalizeSubject({ id: uid('subject'), name, type: editor.type, color: editor.color, aliases: editor.aliases });
+    settings.subjects.push(subject);
+    if (editor.assignToDraft && ui.draft) ui.draft.subjectId = subject.id;
+    ui.subjectCreator = null;
+    commitSettings();
+    render();
+    notify(`${subjectTypeLabel(subject.type)} «${subject.name}» создан${subject.type === 'persona' ? 'а' : ''}.`, 'success');
+}
+
+function createInlineTag() {
+    captureDraft();
+    const editor = ui.tagCreator;
+    if (!editor) return;
+    const name = normalizeName(editor.name);
+    if (!name) {
+        editor.error = 'Заполни название тега.';
+        render();
+        return;
+    }
+    if (settings.tags.some(tag => comparableName(tag.name) === comparableName(name))) {
+        editor.error = 'Такой тег уже существует. Выбери его в полосе тегов.';
+        render();
+        return;
+    }
+    const tag = normalizeTag({ id: uid('tag'), name, color: editor.color });
+    settings.tags.push(tag);
+    if (editor.assignToDraft && ui.draft && !ui.draft.tagIds.includes(tag.id)) ui.draft.tagIds.push(tag.id);
+    ui.tagCreator = null;
+    commitSettings();
+    render();
+    notify(`Тег «${tag.name}» создан.`, 'success');
 }
 
 async function managePins() {
@@ -905,6 +984,8 @@ function bindEvents() {
         generationController = null;
         profileTestController?.abort();
         profileTestController = null;
+        ui.subjectCreator = null;
+        ui.tagCreator = null;
         ui.view = this.dataset.view;
         render();
     });
@@ -929,12 +1010,18 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="apply-outfit"]', function () { void applyOutfit(this.dataset.outfitId); });
     $(document).on(`click${NS}`, '[data-action="undo"]', () => void undoApply());
     $(document).on(`click${NS}`, '[data-action="toggle-favorite"]', function () { const outfit = findOutfit(this.dataset.outfitId); if (!outfit) return; outfit.favorite = !outfit.favorite; outfit.updatedAt = new Date().toISOString(); commitSettings(); render(); });
-    $(document).on(`click${NS}`, '[data-action="edit-outfit"]', function () { const outfit = findOutfit(this.dataset.outfitId); if (!outfit) return; ui.draft = clone(outfit); ui.createMode = 'write'; ui.view = 'create'; render(); });
+    $(document).on(`click${NS}`, '[data-action="edit-outfit"]', function () { const outfit = findOutfit(this.dataset.outfitId); if (!outfit) return; ui.draft = clone(outfit); ui.subjectCreator = null; ui.tagCreator = null; ui.createMode = 'write'; ui.view = 'create'; render(); });
     $(document).on(`click${NS}`, '[data-action="create-mode"]', function () { captureDraft(); operationRevision++; generationController?.abort(); generationController = null; ui.createMode = this.dataset.mode === 'generate' ? 'generate' : 'write'; render(); });
-    $(document).on(`click${NS}`, '[data-action="reset-draft"]', () => { captureDraft(); imageRevision++; ui.draft = null; ui.generator = { target: '', wishes: '', avoid: '' }; render(); });
-    $(document).on(`click${NS}`, '[data-action="quick-subject"]', () => void quickSubjectChoice());
-    $(document).on(`click${NS}`, '[data-action="new-subject"]', async function () { const subject = await openNameColorEditor('subject', this.dataset.type); if (subject) render(); });
-    $(document).on(`click${NS}`, '[data-action="new-tag"]', async () => { captureDraft(); const tag = await openNameColorEditor('tag'); if (tag) render(); });
+    $(document).on(`click${NS}`, '[data-action="reset-draft"]', () => { captureDraft(); imageRevision++; ui.draft = null; ui.subjectCreator = null; ui.tagCreator = null; ui.generator = { target: '', wishes: '', avoid: '' }; render(); });
+    $(document).on(`click${NS}`, '[data-action="quick-subject"]', () => openInlineSubjectCreator('character', true));
+    $(document).on(`click${NS}`, '[data-action="new-subject"]', function () { openInlineSubjectCreator(this.dataset.type, ui.view === 'create'); });
+    $(document).on(`click${NS}`, '[data-action="new-tag"]', () => openInlineTagCreator(ui.view === 'create'));
+    $(document).on(`click${NS}`, '[data-action="cancel-inline-subject"]', () => { captureDraft(); ui.subjectCreator = null; render(); });
+    $(document).on(`click${NS}`, '[data-action="cancel-inline-tag"]', () => { captureDraft(); ui.tagCreator = null; render(); });
+    $(document).on(`click${NS}`, '[data-action="create-inline-subject"]', createInlineSubject);
+    $(document).on(`click${NS}`, '[data-action="create-inline-tag"]', createInlineTag);
+    $(document).on(`keydown${NS}`, '#nw-inline-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); captureDraft(); const alias = normalizeName(this.value); const editor = ui.subjectCreator; if (!editor || !alias || editor.aliases.some(item => comparableName(item) === comparableName(alias))) return; editor.aliases.push(alias); render(); });
+    $(document).on(`click${NS}`, '[data-action="remove-inline-alias"]', function () { captureDraft(); if (!ui.subjectCreator) return; ui.subjectCreator.aliases = ui.subjectCreator.aliases.filter(alias => alias !== this.dataset.alias); render(); });
     $(document).on(`click${NS}`, '[data-action="draft-tag"]', function () { captureDraft(); const id = this.dataset.tagId; ui.draft.tagIds.includes(id) ? ui.draft.tagIds = ui.draft.tagIds.filter(item => item !== id) : ui.draft.tagIds.push(id); render(); });
     $(document).on(`change${NS}`, '#nw-image-files', function () { const files = this.files; this.value = ''; void handleImageFiles(files); });
     $(document).on(`click${NS}`, '[data-action="remove-image"]', function () { captureDraft(); ui.draft.images = ui.draft.images.filter(image => image.id !== this.dataset.imageId); render(); });
@@ -971,6 +1058,8 @@ function onChatChanged() {
     ui.undo = null;
     ui.status = '';
     ui.draft = null;
+    ui.subjectCreator = null;
+    ui.tagCreator = null;
     render();
 }
 
@@ -983,7 +1072,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.0.0 ready');
+        console.log('[NESS Wardrobe] v1.2.0 ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');
