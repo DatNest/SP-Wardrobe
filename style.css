@@ -392,7 +392,9 @@
 
 .nw-form-actions .menu_button,
 .nw-action-row .menu_button {
+    flex: 0 0 auto;
     margin: 0;
+    white-space: nowrap;
 }
 
 .nw-file-button {

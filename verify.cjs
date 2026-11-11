@@ -40,7 +40,11 @@ assert.equal(normalized.regex.searchDepth, 100);
 
 const roundTrip = vm.runInContext('readExport(makeExport(normalizeSettings(DEFAULT_SETTINGS)))', context);
 assert.equal(roundTrip.version, 1);
-assert.equal(roundTrip.prompts.outfit.includes('{{world}}'), true);
+assert.equal(roundTrip.connection.profileId, 'auto');
+assert.equal(roundTrip.prompts.scan.includes('{{world}}'), true);
+assert.equal(roundTrip.prompts.scan.includes('{{posts}}'), true);
+assert.equal(roundTrip.prompts.outfit.includes('{{scan}}'), true);
+assert.equal(vm.runInContext(`parseScanResult('{"summary":"Осень, дорога, холод"}')`, context), 'Осень, дорога, холод');
 
 let workerResult = null;
 context.self = { postMessage: value => { workerResult = value; } };
@@ -76,7 +80,7 @@ const css = read('style.css');
 const preview = read('preview.html');
 const manifest = JSON.parse(read('manifest.json'));
 
-assert.equal(manifest.version, '1.0.0');
+assert.equal(manifest.version, '1.1.0');
 assert.equal(manifest.auto_update, false);
 assert.equal((indexSource.match(/data-view="(?:gallery|create|settings)"/g) || []).length, 3, 'exactly three primary tabs');
 assert.match(indexSource, /data-mode="write"/);
@@ -94,6 +98,13 @@ assert.doesNotMatch(indexSource + generationSource + coreSource, /localStorage/)
 assert.match(generationSource, /getWorldInfoPrompt/);
 assert.match(generationSource, /\.slice\(-2\)/);
 assert.match(generationSource, /generateRaw/);
+assert.match(generationSource, /ConnectionManagerRequestService/);
+assert.match(generationSource, /sendRequest/);
+assert.match(generationSource, /scanTemplate/);
+assert.match(generationSource, /outfitTemplate/);
+assert.match(indexSource, /nw-connection-profile/);
+assert.match(indexSource, /Промпт сканирования/);
+assert.doesNotMatch(indexSource, />Проверить на последних постах</);
 assert.doesNotMatch(css, /linear-gradient|radial-gradient/i);
 assert.match(css, /--SmartTheme/);
 assert.match(css, /env\(safe-area-inset/);
@@ -103,6 +114,66 @@ assert.match(css, /max-width: 280px/);
 assert.equal((preview.match(/data-preview-tab=/g) || []).length, 3, 'preview exposes all three tabs');
 assert.match(preview, /data-preview-mode="write"/);
 assert.match(preview, /data-preview-mode="generate"/);
+assert.match(preview, /Подключение к модели/);
 assert.match(preview, /addEventListener\('click'/);
 
-console.log('NESS Wardrobe verification: OK');
+(async () => {
+    const generationVmSource = generationSource.replace(/^import .*;\r?\n/gm, '').replace(/^export\s+/gm, '');
+    const calls = [];
+    const generationContext = vm.createContext({
+        console,
+        Date,
+        Promise,
+        String,
+        Array,
+        Error,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fillPrompt: vm.runInContext('fillPrompt', context),
+        parseGeneratedOutfit: vm.runInContext('parseGeneratedOutfit', context),
+        parseScanResult: vm.runInContext('parseScanResult', context),
+    });
+    generationContext.mockContext = {
+        chat: [
+            { name: 'Old', mes: 'OLDEST_POST', is_system: false },
+            { name: 'User', mes: 'RECENT_ONE', is_system: false, is_user: true },
+            { name: 'Ada', mes: 'RECENT_TWO', is_system: false },
+        ],
+        extensionSettings: { connectionManager: { selectedProfile: 'profile-1' } },
+        getWorldInfoPrompt: async () => ({ worldInfoString: 'WORLD_FACTS' }),
+        ConnectionManagerRequestService: {
+            getSupportedProfiles: () => [{ id: 'profile-1', name: 'Main profile' }],
+            sendRequest: async (id, messages) => {
+                calls.push({ id, text: messages.map(item => item.content).join('\n') });
+                return calls.length === 1
+                    ? { content: '{"summary":"cold autumn road"}' }
+                    : { content: '{"name":"Road coat","description":"warm wool coat"}' };
+            },
+        },
+    };
+    vm.runInContext(generationVmSource, generationContext, { filename: 'generation.js' });
+    const profiles = await vm.runInContext('listConnectionProfiles(mockContext)', generationContext);
+    assert.deepEqual(JSON.parse(JSON.stringify(profiles)), [{ id: 'profile-1', name: 'Main profile' }]);
+    const result = await vm.runInContext(`generateOutfit(mockContext, {
+        target: 'Ada', wishes: 'warm', avoid: '', profileId: 'auto',
+        scanTemplate: DEFAULT_SCAN, outfitTemplate: DEFAULT_OUTFIT
+    }, new AbortController().signal)`, Object.assign(generationContext, {
+        DEFAULT_SCAN: vm.runInContext('DEFAULT_SCAN_PROMPT', context),
+        DEFAULT_OUTFIT: vm.runInContext('DEFAULT_GENERATION_PROMPT', context),
+    }));
+    assert.equal(result.name, 'Road coat');
+    assert.equal(result.description, 'warm wool coat');
+    assert.equal(calls.length, 2, 'scan and generation must be separate requests');
+    assert.equal(calls[0].id, 'profile-1');
+    assert.equal(calls[1].id, 'profile-1');
+    assert.match(calls[0].text, /WORLD_FACTS/);
+    assert.match(calls[0].text, /RECENT_ONE/);
+    assert.match(calls[0].text, /RECENT_TWO/);
+    assert.doesNotMatch(calls[0].text, /OLDEST_POST/);
+    assert.match(calls[1].text, /cold autumn road/);
+    console.log('NESS Wardrobe verification: OK');
+})().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

@@ -4,6 +4,7 @@ import { Popup, POPUP_TYPE } from '../../../popup.js';
 import {
     CHAT_META_KEY,
     DEFAULT_GENERATION_PROMPT,
+    DEFAULT_SCAN_PROMPT,
     DEFAULT_SETTINGS,
     EXTENSION_KEY,
     clone,
@@ -26,7 +27,7 @@ import {
     uid,
     validateRegexRule,
 } from './core.js';
-import { generateOutfit } from './generation.js';
+import { generateOutfit, listConnectionProfiles, testConnectionProfile } from './generation.js';
 import { prepareImage } from './images.js';
 
 const GALLERY_FIRST = 48;
@@ -42,6 +43,10 @@ let operationRevision = 0;
 let imageRevision = 0;
 let mainModule = null;
 let applyBusy = false;
+let connectionProfiles = [];
+let profilesLoaded = false;
+let profilesLoading = false;
+let profileTestController = null;
 
 const ui = {
     view: 'gallery',
@@ -55,6 +60,7 @@ const ui = {
     generator: { target: '', wishes: '', avoid: '' },
     undo: null,
     status: '',
+    connectionStatus: '',
 };
 
 function getSettingsContainer() {
@@ -143,6 +149,13 @@ function subjectIcon(type) {
 
 function subjectTypeLabel(type) {
     return type === 'persona' ? 'Персона' : 'Персонаж';
+}
+
+function selectedConnectionLabel() {
+    const selected = settings.connection.profileId;
+    if (selected === 'auto') return 'выбранный в SillyTavern';
+    if (selected === 'direct') return 'текущее подключение';
+    return connectionProfiles.find(profile => profile.id === selected)?.name || selected;
 }
 
 function colorStyle(color) {
@@ -323,7 +336,7 @@ function createViewHtml() {
         <datalist id="nw-subject-names">${settings.subjects.map(subject => `<option value="${escapeHtml(subject.name)}"></option>`).join('')}</datalist>
         <label><span>Пожелания</span><textarea id="nw-generate-wishes" class="text_pole" rows="3" placeholder="Например: дорожный наряд для дождливой осени">${escapeHtml(ui.generator.wishes)}</textarea></label>
         <label><span>Чего избегать <small>необязательно</small></span><textarea id="nw-generate-avoid" class="text_pole" rows="2" placeholder="Например: яркие цвета, современная синтетика">${escapeHtml(ui.generator.avoid)}</textarea></label>
-        <small>Будут прочитаны постоянные и подходящие записи лорбука, а также последние два поста. Результат останется черновиком.</small>
+        <small>Профиль «${escapeHtml(selectedConnectionLabel())}» сначала проанализирует лорбук и последние два поста, затем создаст наряд. Результат останется черновиком.</small>
         <button class="menu_button menu_button_icon" data-action="generate-outfit"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать описание</span></button>
         <div id="nw-generation-status" class="nw-message" role="status" aria-live="polite"></div>
     </section>` : '<p class="nw-help">Заполни описание вручную. Оно будет вставляться в найденную группу одежды без дополнительных изменений.</p>';
@@ -351,13 +364,26 @@ function tagSettingsRow(tag) {
     return `<article class="nw-settings-row nw-tag-settings-row" data-tag-id="${escapeHtml(tag.id)}"><span class="nw-color-dot" style="${colorStyle(tag.color)}"></span><input class="text_pole" data-tag-field="name" maxlength="120" value="${escapeHtml(tag.name)}"><input type="color" data-tag-field="color" value="${escapeHtml(tag.color)}"><button class="menu_button fa-fw" data-action="delete-tag" aria-label="Удалить тег" title="Удалить тег"><i class="fa-solid fa-trash"></i></button></article>`;
 }
 
+function connectionOptionsHtml() {
+    const selected = settings.connection.profileId;
+    const known = new Set(connectionProfiles.map(profile => profile.id));
+    const missing = !['auto', 'direct'].includes(selected) && !known.has(selected)
+        ? `<option value="${escapeHtml(selected)}" selected>Недоступный профиль: ${escapeHtml(selected)}</option>`
+        : '';
+    return `<option value="auto" ${selected === 'auto' ? 'selected' : ''}>Автоматически — выбранный профиль SillyTavern</option>
+        <option value="direct" ${selected === 'direct' ? 'selected' : ''}>Текущее подключение без профиля</option>
+        ${missing}${connectionProfiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${selected === profile.id ? 'selected' : ''}>${escapeHtml(profile.name)}</option>`).join('')}`;
+}
+
 function settingsViewHtml() {
     const rule = settings.regex;
     return `<div class="nw-settings-stack">
         <details class="settingsSectionWrap" open><summary><strong>Персоны и персонажи</strong><small>${settings.subjects.length}</small></summary><div class="nw-details-body"><p class="nw-help"><b>Персонаж ◆</b> — герой или NPC. <b>Персона ●</b> — образ пользователя. Цвет помогает узнать их в фильтрах.</p><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div><div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></div></details>
         <details class="settingsSectionWrap"><summary><strong>Обычные теги</strong><small>${settings.tags.length}</small></summary><div class="nw-details-body"><p class="nw-help">Например: зима, формальное, дорожное. Их цвет не попадает в описание одежды.</p><button class="menu_button" data-action="new-tag">+ Новый тег</button><div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></div></details>
-        <details class="settingsSectionWrap" open><summary><strong>Вставка в пост</strong></summary><div class="nw-details-body"><p class="nw-help">Правило должно содержать отдельную группу имени и отдельную группу одежды. Пример можно проверить без изменения поста.</p><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="4" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов искать</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить на последних постах</button><button class="menu_button" data-action="save-settings">Сохранить настройки</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></div></details>
-        <details class="settingsSectionWrap"><summary><strong>Промпт генерации</strong></summary><div class="nw-details-body"><p class="nw-help">Доступные вставки: {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</p><textarea id="nw-generation-prompt" class="text_pole nw-code-field" rows="14" maxlength="20000">${escapeHtml(settings.prompts.outfit)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-prompt">Вернуть стандартный текст</button><button class="menu_button" data-action="save-settings">Сохранить настройки</button></div></div></details>
+        <details class="settingsSectionWrap" open><summary><strong>Подключение к модели</strong><small>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</small></summary><div class="nw-details-body"><p class="nw-help">Один профиль сначала анализирует лорбук и два последних поста, затем создаёт наряд. Пресет основного чата не используется.</p><label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label><div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button" data-action="save-settings">Сохранить</button></div><div id="nw-connection-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div></div></details>
+        <details class="settingsSectionWrap" open><summary><strong>Вставка в пост</strong></summary><div class="nw-details-body"><p class="nw-help">Правило должно содержать отдельную группу имени и отдельную группу одежды. Проверка читает последние посты, но ничего в них не меняет.</p><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="4" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов искать</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></div></details>
+        <details class="settingsSectionWrap"><summary><strong>Промпт сканирования</strong></summary><div class="nw-details-body"><p class="nw-help">Первый запрос извлекает факты из лорбука и двух постов. Доступны: {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</p><textarea id="nw-scan-prompt" class="text_pole nw-code-field" rows="14" maxlength="20000">${escapeHtml(settings.prompts.scan)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-scan-prompt">Вернуть стандартный текст</button><button class="menu_button" data-action="save-settings">Сохранить</button></div></div></details>
+        <details class="settingsSectionWrap"><summary><strong>Промпт генерации</strong></summary><div class="nw-details-body"><p class="nw-help">Второй запрос получает готовый разбор. Доступны: {{target}}, {{wishes}}, {{avoid}}, {{scan}}, {{world}}, {{posts}}, {{current_date}}.</p><textarea id="nw-generation-prompt" class="text_pole nw-code-field" rows="14" maxlength="20000">${escapeHtml(settings.prompts.outfit)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-generation-prompt">Вернуть стандартный текст</button><button class="menu_button" data-action="save-settings">Сохранить</button></div></div></details>
         <details class="settingsSectionWrap"><summary><strong>Перенос и резервная копия</strong></summary><div class="nw-details-body"><p class="nw-help">Файл содержит наряды, изображения, теги, персонажей, правило и промпт. Закрепления отдельных чатов в него не входят.</p><div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="export"><i class="fa-solid fa-file-export"></i><span>Экспорт</span></button><label class="menu_button menu_button_icon nw-file-button"><i class="fa-solid fa-file-import"></i><span>Импорт</span><input id="nw-import-file" type="file" accept="application/json,.json" hidden></label></div></div></details>
     </div>`;
 }
@@ -374,6 +400,7 @@ function render() {
     if (content) {
         content.innerHTML = ui.view === 'create' ? createViewHtml() : ui.view === 'settings' ? settingsViewHtml() : galleryViewHtml();
         if (ui.view === 'gallery') requestAnimationFrame(() => renderGalleryGrid(true));
+        if (ui.view === 'settings' && !profilesLoaded && !profilesLoading) void refreshConnectionProfiles(false);
     }
     if (floating.visible) requestAnimationFrame(applyFloatingButtonPosition);
 }
@@ -392,6 +419,8 @@ function showPanel() {
             imageRevision++;
             generationController?.abort();
             generationController = null;
+            profileTestController?.abort();
+            profileTestController = null;
             disposeGalleryObserver();
             clearTimeout(searchTimer);
         },
@@ -414,18 +443,61 @@ function setMessage(id, value) {
     if (node) node.textContent = String(value || '');
 }
 
+async function refreshConnectionProfiles(showStatus = true) {
+    if (profilesLoading) return;
+    profilesLoading = true;
+    if (showStatus) ui.connectionStatus = 'Обновляю список профилей…';
+    if (managerPopup && ui.view === 'settings') render();
+    try {
+        connectionProfiles = await listConnectionProfiles(getContext());
+        profilesLoaded = true;
+        ui.connectionStatus = connectionProfiles.length
+            ? `Доступно профилей: ${connectionProfiles.length}.`
+            : 'Профили Connection Manager не найдены. Можно использовать текущее подключение.';
+    } catch (error) {
+        ui.connectionStatus = `Не удалось получить профили: ${error.message || error}`;
+    } finally {
+        profilesLoading = false;
+        if (managerPopup && ui.view === 'settings') render();
+    }
+}
+
+async function testSelectedProfile() {
+    if (profileTestController) return;
+    const selected = document.getElementById('nw-connection-profile')?.value || settings.connection.profileId;
+    profileTestController = new AbortController();
+    ui.connectionStatus = 'Проверяю подключение…';
+    setMessage('nw-connection-status', ui.connectionStatus);
+    $('[data-action="test-profile"]').prop('disabled', true);
+    try {
+        await testConnectionProfile(getContext(), selected, profileTestController.signal);
+        ui.connectionStatus = 'Подключение отвечает.';
+    } catch (error) {
+        ui.connectionStatus = `Подключение не отвечает: ${error.message || error}`;
+    } finally {
+        profileTestController = null;
+        setMessage('nw-connection-status', ui.connectionStatus);
+        $('[data-action="test-profile"]').prop('disabled', false);
+    }
+}
+
 async function saveSettingsForm() {
-    const status = document.getElementById('nw-settings-status');
+    const statuses = [document.getElementById('nw-settings-status'), document.getElementById('nw-connection-status')].filter(Boolean);
     try {
         const rule = readRegexForm();
         if (rule.pattern) await validateRegexRule(rule);
         settings.regex = rule;
-        const prompt = document.getElementById('nw-generation-prompt');
-        if (prompt) settings.prompts.outfit = prompt.value.trim() || DEFAULT_GENERATION_PROMPT;
+        const profile = document.getElementById('nw-connection-profile');
+        if (profile) settings.connection.profileId = profile.value || 'auto';
+        const scanPrompt = document.getElementById('nw-scan-prompt');
+        const generationPrompt = document.getElementById('nw-generation-prompt');
+        if (scanPrompt) settings.prompts.scan = scanPrompt.value.trim() || DEFAULT_SCAN_PROMPT;
+        if (generationPrompt) settings.prompts.outfit = generationPrompt.value.trim() || DEFAULT_GENERATION_PROMPT;
         commitSettings();
-        if (status) status.textContent = 'Настройки сохранены.';
+        ui.connectionStatus = 'Настройки сохранены.';
+        for (const status of statuses) status.textContent = 'Настройки сохранены.';
     } catch (error) {
-        if (status) status.textContent = `Не сохранено: ${error.message || error}`;
+        for (const status of statuses) status.textContent = `Не сохранено: ${error.message || error}`;
     }
 }
 
@@ -560,7 +632,14 @@ async function generateFromForm() {
     $('#nw-header-status').text('Генерирую…');
     $('[data-action="generate-outfit"]').prop('disabled', true);
     try {
-        const result = await generateOutfit(getContext(), { target, wishes: ui.generator.wishes, avoid: ui.generator.avoid, template: settings.prompts.outfit }, generationController.signal);
+        const result = await generateOutfit(getContext(), {
+            target,
+            wishes: ui.generator.wishes,
+            avoid: ui.generator.avoid,
+            profileId: settings.connection.profileId,
+            scanTemplate: settings.prompts.scan,
+            outfitTemplate: settings.prompts.outfit,
+        }, generationController.signal, message => setMessage('nw-generation-status', message));
         if (ownRevision !== operationRevision || ui.view !== 'create' || ui.createMode !== 'generate') return;
         ui.draft.name = result.name;
         ui.draft.description = result.description;
@@ -824,6 +903,8 @@ function bindEvents() {
         imageRevision++;
         generationController?.abort();
         generationController = null;
+        profileTestController?.abort();
+        profileTestController = null;
         ui.view = this.dataset.view;
         render();
     });
@@ -863,7 +944,10 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="generate-outfit"]', () => void generateFromForm());
     $(document).on(`click${NS}`, '[data-action="save-settings"]', () => void saveSettingsForm());
     $(document).on(`click${NS}`, '[data-action="test-regex"]', () => void testRegex());
-    $(document).on(`click${NS}`, '[data-action="reset-prompt"]', () => { const field = document.getElementById('nw-generation-prompt'); if (field) field.value = DEFAULT_GENERATION_PROMPT; });
+    $(document).on(`click${NS}`, '[data-action="refresh-profiles"]', () => void refreshConnectionProfiles(true));
+    $(document).on(`click${NS}`, '[data-action="test-profile"]', () => void testSelectedProfile());
+    $(document).on(`click${NS}`, '[data-action="reset-scan-prompt"]', () => { const field = document.getElementById('nw-scan-prompt'); if (field) field.value = DEFAULT_SCAN_PROMPT; });
+    $(document).on(`click${NS}`, '[data-action="reset-generation-prompt"]', () => { const field = document.getElementById('nw-generation-prompt'); if (field) field.value = DEFAULT_GENERATION_PROMPT; });
     $(document).on(`change${NS}`, '[data-subject-field]', function () { const row = this.closest('[data-subject-id]'); const subject = findSubject(row?.dataset.subjectId); if (!subject) return; const field = this.dataset.subjectField; if (field === 'name') { subject.name = normalizeName(this.value) || subject.name; this.value = subject.name; } if (field === 'type') subject.type = this.value === 'persona' ? 'persona' : 'character'; if (field === 'color') subject.color = normalizeColor(this.value, subject.color); commitSettings(); });
     $(document).on(`keydown${NS}`, '.nw-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); const alias = normalizeName(this.value); if (!subject || !alias || comparableName(alias) === comparableName(subject.name) || subject.aliases.some(item => comparableName(item) === comparableName(alias))) return; subject.aliases.push(alias); commitSettings(); render(); });
     $(document).on(`click${NS}`, '[data-action="remove-alias"]', function () { const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); if (!subject) return; subject.aliases = subject.aliases.filter(alias => alias !== this.dataset.alias); commitSettings(); render(); });
@@ -879,6 +963,8 @@ function onChatChanged() {
     imageRevision++;
     generationController?.abort();
     generationController = null;
+    profileTestController?.abort();
+    profileTestController = null;
     ui.view = 'gallery';
     ui.subjectFilter = '';
     ui.tagFilters.clear();
