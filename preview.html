@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NESS Wardrobe preview</title>
+<link rel="stylesheet" href="style.css">
+<style>
+:root{--SmartThemeBorderColor:#8e6656;--SmartThemeBlurTintColor:#261814;--SmartThemeBodyColor:#180f0c;--SmartThemeEmColor:#c9aea1;--SmartThemeBorderRadius:8px}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:12px;background:#130b09;color:#eadbd1;font:14px/1.4 system-ui,sans-serif}.popup{width:min(920px,100%);border:1px solid var(--SmartThemeBorderColor);border-radius:12px;background:#211410;box-shadow:0 14px 45px #0009;overflow:hidden}.menu_button,.text_pole{color:inherit;background:#2b1d18;border:1px solid var(--SmartThemeBorderColor);border-radius:7px;font:inherit}.menu_button{min-height:36px;padding:6px 10px;cursor:pointer}.menu_button.active{background:#664436}.text_pole{padding:7px 9px}.settingsSectionWrap{padding:10px;border:1px solid var(--SmartThemeBorderColor);border-radius:8px;background:#261814}.preview-view[hidden],.preview-mode[hidden]{display:none!important}.nw-gallery-grid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}.nw-outfit-image{background:#38251e}.nw-outfit-image span{font-size:44px}.nw-outfit-card:nth-child(2n) .nw-outfit-image{background:#2c2424}.nw-outfit-card:nth-child(3n) .nw-outfit-image{background:#25272d}.preview-note{margin:0;color:var(--SmartThemeEmColor)}
+</style>
+</head>
+<body>
+<div class="popup"><div class="nw-panel">
+<header class="nw-header"><h3 class="nw-brand"><span>👗</span><span>Гардероб</span></h3><span id="preview-status" class="nw-header-status" role="status"></span></header>
+<nav class="nw-nav" aria-label="Разделы предпросмотра">
+<button class="menu_button active" data-preview-tab="gallery">▦ <span>Гардероб</span></button>
+<button class="menu_button" data-preview-tab="create">＋ <span>Создать наряд</span></button>
+<button class="menu_button" data-preview-tab="settings">⚙ <span>Настройки</span></button>
+</nav>
+
+<main class="nw-content preview-view" data-preview-view="gallery"><section class="nw-gallery-tools">
+<div class="nw-chat-line"><div><small>Закреплено в чате</small><strong>Пример текущего чата</strong></div><button class="menu_button" title="Закрепить">⌖</button></div>
+<div class="nw-search-row"><input class="text_pole" placeholder="Найти наряд…"><button class="menu_button">★</button></div>
+<div class="nw-filter-label"><span>Персоны и персонажи</span><button class="menu_button nw-clear-filter active">Все</button></div>
+<div class="nw-filter-strip"><button class="menu_button nw-chip nw-subject-chip nw-character" style="--nw-tag-color:#c38269">◆ <span>Ада</span></button><button class="menu_button nw-chip nw-subject-chip nw-persona" style="--nw-tag-color:#69a3b8">● <span>Моя персона</span></button><button class="menu_button nw-chip nw-subject-chip nw-character" style="--nw-tag-color:#8e79ad">◆ <span>Мира</span></button></div>
+<div class="nw-filter-label"><span>Теги</span></div><div class="nw-filter-strip"><button class="menu_button nw-chip nw-tag-chip" style="--nw-tag-color:#6f9f89"><span class="nw-color-dot"></span>Дорожное</button><button class="menu_button nw-chip nw-tag-chip" style="--nw-tag-color:#9f8065"><span class="nw-color-dot"></span>Осень</button><button class="menu_button nw-chip nw-tag-chip" style="--nw-tag-color:#7886aa"><span class="nw-color-dot"></span>Формальное</button></div>
+</section><section class="nw-gallery-grid">
+<article class="nw-outfit-card"><button class="nw-outfit-apply"><span class="nw-outfit-image"><span>🧥</span></span><span class="nw-outfit-copy"><strong>Дорожное пальто</strong><small>◆ Ада</small></span></button><div class="nw-card-tags"><span class="nw-card-tag" style="--nw-tag-color:#6f9f89"><span class="nw-color-dot"></span>Дорожное</span></div><div class="nw-card-actions"><button class="menu_button">★</button><button class="menu_button">✎</button></div></article>
+<article class="nw-outfit-card"><button class="nw-outfit-apply"><span class="nw-outfit-image"><span>👘</span></span><span class="nw-outfit-copy"><strong>Льняной комплект</strong><small>● Моя персона</small></span></button><div class="nw-card-tags"><span class="nw-card-tag" style="--nw-tag-color:#9f8065"><span class="nw-color-dot"></span>Осень</span></div><div class="nw-card-actions"><button class="menu_button">★</button><button class="menu_button">✎</button></div></article>
+<article class="nw-outfit-card"><button class="nw-outfit-apply"><span class="nw-outfit-image"><span>🥻</span></span><span class="nw-outfit-copy"><strong>Вечерний шёлк</strong><small>◆ Мира</small></span></button><div class="nw-card-tags"><span class="nw-card-tag" style="--nw-tag-color:#7886aa"><span class="nw-color-dot"></span>Формальное</span></div><div class="nw-card-actions"><button class="menu_button">★</button><button class="menu_button">✎</button></div></article>
+<article class="nw-outfit-card"><button class="nw-outfit-apply"><span class="nw-outfit-image"><span>🧶</span></span><span class="nw-outfit-copy"><strong>Тёплый трикотаж</strong><small>◆ Ада</small></span></button><div class="nw-card-tags"><span class="nw-card-tag" style="--nw-tag-color:#9f8065"><span class="nw-color-dot"></span>Осень</span></div><div class="nw-card-actions"><button class="menu_button">★</button><button class="menu_button">✎</button></div></article>
+</section></main>
+
+<main class="nw-content preview-view" data-preview-view="create" hidden>
+<section class="nw-create-head"><div class="nw-mode-switch" role="group" aria-label="Способ создания"><button class="menu_button active" data-preview-mode="write">Написать</button><button class="menu_button" data-preview-mode="generate">Сгенерировать</button></div><button class="menu_button" title="Новый черновик">＋</button></section>
+<p class="nw-help preview-mode" data-mode-view="write">Заполни описание вручную. Оно будет вставляться в найденную группу одежды без дополнительных изменений.</p>
+<section class="settingsSectionWrap nw-generator preview-mode" data-mode-view="generate" hidden>
+<label><span>Для кого создать наряд</span><input class="text_pole" value="Ада"></label>
+<label><span>Пожелания</span><textarea class="text_pole" rows="3" placeholder="Например: дорожный наряд для дождливой осени"></textarea></label>
+<label><span>Чего избегать <small>необязательно</small></span><textarea class="text_pole" rows="2" placeholder="Например: яркие цвета"></textarea></label>
+<small>Будут прочитаны записи лорбука и последние два поста. Результат останется черновиком.</small>
+<button class="menu_button">✦ Сгенерировать описание</button>
+</section>
+<section class="nw-outfit-form">
+<label><span>Название</span><input class="text_pole" value="Дорожное пальто"></label>
+<label><span>Персона или персонаж</span><div class="nw-field-row"><select class="text_pole"><option>◆ Ада — Персонаж</option><option>● Моя персона — Персона</option></select><button class="menu_button">＋</button></div></label>
+<label><span>Описание одежды</span><textarea class="text_pole" rows="7">Длинное шерстяное пальто тёплого коричневого оттенка, плотная рубашка и удобные дорожные сапоги.</textarea></label>
+<div><div class="nw-field-title"><span>Теги</span><button class="menu_button">+ Новый тег</button></div><div class="nw-filter-strip nw-draft-tags"><button class="menu_button nw-chip nw-tag-chip active" style="--nw-tag-color:#6f9f89"><span class="nw-color-dot"></span>Дорожное</button><button class="menu_button nw-chip nw-tag-chip" style="--nw-tag-color:#9f8065"><span class="nw-color-dot"></span>Осень</button></div></div>
+<div><div class="nw-field-title"><span>Обложка и шоукейс</span><small>1/3</small></div><div class="nw-image-list"><article class="nw-image-preview"><div class="nw-outfit-image"><span>🧥</span></div><div><small>Обложка</small><button class="menu_button">Удалить</button></div></article></div><button class="menu_button nw-file-button">▧ Добавить изображения</button></div>
+<div class="nw-form-actions"><button class="menu_button">▣ Сохранить наряд</button><button class="menu_button">Удалить</button></div>
+</section></main>
+
+<main class="nw-content preview-view" data-preview-view="settings" hidden><div class="nw-settings-stack">
+<details class="settingsSectionWrap" open><summary><strong>Персоны и персонажи</strong><small>3</small></summary><div class="nw-details-body"><p class="nw-help"><b>Персонаж ◆</b> — герой или NPC. <b>Персона ●</b> — образ пользователя.</p><div class="nw-action-row"><button class="menu_button">+ Персонаж</button><button class="menu_button">+ Персона</button></div><div class="nw-settings-list"><article class="nw-settings-row"><div class="nw-settings-row-head"><span class="nw-type-badge nw-character" style="--nw-tag-color:#c38269">◆ Персонаж</span><button class="menu_button">Удалить</button></div><div class="nw-settings-grid"><label><span>Имя</span><input class="text_pole" value="Ада"></label><label><span>Тип</span><select class="text_pole"><option>Персонаж</option><option>Персона</option></select></label><label class="nw-color-field"><span>Цвет</span><input type="color" value="#c38269"></label></div></article></div></div></details>
+<details class="settingsSectionWrap"><summary><strong>Обычные теги</strong><small>3</small></summary><div class="nw-details-body"><p class="preview-note">Цветные метки для поиска по галерее.</p><button class="menu_button">+ Новый тег</button></div></details>
+<details class="settingsSectionWrap" open><summary><strong>Вставка в пост</strong></summary><div class="nw-details-body"><label><span>Регулярное выражение</span><textarea class="text_pole nw-code-field" rows="4">(?&lt;name&gt;[^:]+): (?&lt;outfit&gt;.+)</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input class="text_pole" value="gms"></label><label><span>Группа имени</span><input class="text_pole" value="name"></label><label><span>Группа одежды</span><input class="text_pole" value="outfit"></label></div><div class="nw-action-row"><button class="menu_button">Проверить на последних постах</button><button class="menu_button">Сохранить настройки</button></div></div></details>
+<details class="settingsSectionWrap"><summary><strong>Промпт генерации</strong></summary><div class="nw-details-body"><textarea class="text_pole nw-code-field" rows="8">Создай один практичный и визуально цельный наряд для {{target}}…</textarea></div></details>
+<details class="settingsSectionWrap"><summary><strong>Перенос и резервная копия</strong></summary><div class="nw-details-body"><div class="nw-action-row"><button class="menu_button">Экспорт</button><button class="menu_button">Импорт</button></div></div></details>
+</div></main>
+</div></div>
+<script>
+const tabs=[...document.querySelectorAll('[data-preview-tab]')];
+const views=[...document.querySelectorAll('[data-preview-view]')];
+for(const tab of tabs)tab.addEventListener('click',()=>{for(const item of tabs)item.classList.toggle('active',item===tab);for(const view of views)view.hidden=view.dataset.previewView!==tab.dataset.previewTab;document.getElementById('preview-status').textContent='';});
+const modes=[...document.querySelectorAll('[data-preview-mode]')];
+const modeViews=[...document.querySelectorAll('[data-mode-view]')];
+for(const button of modes)button.addEventListener('click',()=>{for(const item of modes)item.classList.toggle('active',item===button);for(const view of modeViews)view.hidden=view.dataset.modeView!==button.dataset.previewMode;});
+</script>
+</body></html>

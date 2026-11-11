@@ -1,0 +1,11 @@
+{
+  "display_name": "NESS Wardrobe",
+  "loading_order": 6,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Tane4ka",
+  "version": "1.0.0",
+  "auto_update": false
+}
