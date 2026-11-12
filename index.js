@@ -31,8 +31,8 @@ import {
 import { generateOutfit, listConnectionProfiles, testConnectionProfile } from './generation.js';
 import { imageFileFromUrl, prepareImage } from './images.js';
 
-const GALLERY_FIRST = 48;
-const GALLERY_MORE = 32;
+const GALLERY_FIRST = 24;
+const GALLERY_MORE = 16;
 const NS = '.nessWardrobe';
 const SETTINGS_TABS = [
     { id: 'subjects', label: 'Персонажи', icon: 'fa-users' },
@@ -597,21 +597,35 @@ async function testSelectedProfile() {
 async function saveSettingsForm({ silent = false } = {}) {
     const status = document.getElementById('nw-settings-status');
     try {
+        let changed = false;
         if (ui.settingsTab === 'insertion') {
             const rule = readRegexForm();
-            if (rule.pattern) await validateRegexRule(rule);
+            if (!silent && rule.pattern) await validateRegexRule(rule);
+            changed = JSON.stringify(settings.regex) !== JSON.stringify(rule);
             settings.regex = rule;
         } else if (ui.settingsTab === 'connection') {
             const profile = document.getElementById('nw-connection-profile');
-            if (profile) settings.connection.profileId = profile.value || 'auto';
+            if (profile) {
+                const profileId = profile.value || 'auto';
+                changed = settings.connection.profileId !== profileId;
+                settings.connection.profileId = profileId;
+            }
         } else if (ui.settingsTab === 'scan') {
             const field = document.getElementById('nw-scan-prompt');
-            if (field) settings.prompts.scan = field.value.trim() || DEFAULT_SCAN_PROMPT;
+            if (field) {
+                const prompt = field.value.trim() || DEFAULT_SCAN_PROMPT;
+                changed = settings.prompts.scan !== prompt;
+                settings.prompts.scan = prompt;
+            }
         } else if (ui.settingsTab === 'generation') {
             const field = document.getElementById('nw-generation-prompt');
-            if (field) settings.prompts.outfit = field.value.trim() || DEFAULT_GENERATION_PROMPT;
+            if (field) {
+                const prompt = field.value.trim() || DEFAULT_GENERATION_PROMPT;
+                changed = settings.prompts.outfit !== prompt;
+                settings.prompts.outfit = prompt;
+            }
         }
-        commitSettings();
+        if (changed) commitSettings();
         if (ui.settingsTab === 'connection') ui.connectionStatus = 'Настройки сохранены.';
         if (!silent && status) status.textContent = 'Настройки сохранены.';
         return true;
@@ -678,7 +692,7 @@ async function changeActiveEntry(operation, selected, replacement = '') {
         await persistMessageChange(live, snapshot.key, message);
     } catch (error) {
         replaceMessageText(message, snapshot.source);
-        try { mainModule?.updateMessageBlock?.(snapshot.key, message); } catch { /* best effort */ }
+        try { updateMessageDisplay(live, snapshot.key, message); } catch { /* best effort */ }
         throw new Error(`Пост не сохранён: ${error.message || error}`);
     }
     ui.activeNeedsRefresh = true;
@@ -983,12 +997,19 @@ async function generateFromForm() {
     }
 }
 
+function updateMessageDisplay(context, index, message) {
+    if (typeof context?.updateMessageBlock === 'function') context.updateMessageBlock(index, message);
+    else if (typeof mainModule?.updateMessageBlock === 'function') mainModule.updateMessageBlock(index, message);
+}
+
 async function persistMessageChange(context, index, message) {
+    const expected = message?.mes;
+    updateMessageDisplay(context, index, message);
     if (typeof context.saveChat === 'function') await context.saveChat();
+    else if (typeof mainModule?.saveChatConditional === 'function') await mainModule.saveChatConditional();
     else if (typeof mainModule?.saveChat === 'function') await mainModule.saveChat();
-    else if (typeof mainModule?.saveChatDebounced === 'function') mainModule.saveChatDebounced();
-    else throw new Error('SillyTavern не предоставил сохранение чата.');
-    try { mainModule?.updateMessageBlock?.(index, message); } catch (error) { console.warn('[NESS Wardrobe] Message rerender failed:', error); }
+    else throw new Error('SillyTavern не предоставил надёжное сохранение чата.');
+    if (context.chat?.[index] !== message || message?.mes !== expected) throw new Error('SillyTavern изменил сообщение во время сохранения. Повтори действие.');
 }
 
 function replaceMessageText(message, next) {
@@ -1034,7 +1055,7 @@ async function applyOutfit(outfitId) {
             await persistMessageChange(live, index, message);
         } catch (error) {
             replaceMessageText(message, snapshot.source);
-            try { mainModule?.updateMessageBlock?.(index, message); } catch { /* best effort */ }
+            try { updateMessageDisplay(live, index, message); } catch { /* best effort */ }
             throw new Error(`Пост не сохранён: ${error.message || error}`);
         }
         ui.undo = { chatRef: snapshot.chatRef, chatId: snapshot.chatId, index, message, before: snapshot.source, after: result.text, outfitName: outfit.name };
@@ -1278,6 +1299,13 @@ function bindEvents() {
         render();
         requestAnimationFrame(() => document.querySelector(`[data-settings-tab="${nextTab}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center' }));
     });
+    $(document).on(`wheel${NS}`, '.nw-settings-tabs', function (event) {
+        const wheel = event.originalEvent;
+        if (!wheel || this.scrollWidth <= this.clientWidth || Math.abs(wheel.deltaY) <= Math.abs(wheel.deltaX)) return;
+        const before = this.scrollLeft;
+        this.scrollLeft += wheel.deltaY;
+        if (this.scrollLeft !== before) event.preventDefault();
+    });
     $(document).on(`click${NS}`, '[data-action="quick-subject"]', () => openInlineSubjectCreator('character', true));
     $(document).on(`click${NS}`, '[data-action="new-subject"]', function () { openInlineSubjectCreator(this.dataset.type, ui.view === 'create'); });
     $(document).on(`click${NS}`, '[data-action="new-tag"]', () => void openTagCreatorPopup('', false));
@@ -1361,7 +1389,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.4.0 ready');
+        console.log('[NESS Wardrobe] v1.4.1 ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');

@@ -47,16 +47,20 @@ assert.equal(roundTrip.prompts.scan.includes('{{world}}'), true);
 assert.equal(roundTrip.prompts.scan.includes('{{posts}}'), true);
 assert.equal(roundTrip.prompts.outfit.includes('{{scan}}'), true);
 assert.match(roundTrip.regex.pattern, /⟦ОДЕЖДА:/);
-assert.equal(roundTrip.regex.flags, 'gms');
+assert.equal(roundTrip.regex.flags, 'gm');
+assert.doesNotMatch(roundTrip.regex.pattern, /\.\*\?/);
+const migratedRule = vm.runInContext(`normalizeRegexRule({
+    pattern: '⟦ОДЕЖДА:(?<name>[^⟧\\\\r\\\\n]+)⟧[ \\\\t]*(?<outfit>.*?)(?=\\\\r?\\\\n⟦ОДЕЖДА:|\\\\r?\\\\n⟦/ГАРДЕРОБ⟧)',
+    flags: 'gms', nameGroup: 'name', outfitGroup: 'outfit'
+})`, context);
+assert.equal(migratedRule.flags, 'gm');
+assert.doesNotMatch(migratedRule.pattern, /\.\*\?/);
 assert.equal(vm.runInContext(`parseScanResult('{"summary":"Осень, дорога, холод"}')`, context), 'Осень, дорога, холод');
 
 let workerResult = null;
 context.self = { postMessage: value => { workerResult = value; } };
 vm.runInContext('wardrobeRegexWorker()', context);
-const wardrobeRule = {
-    pattern: '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)',
-    flags: 'gms', nameGroup: 'name', outfitGroup: 'outfit', closingMarker: '⟦/ГАРДЕРОБ⟧',
-};
+const wardrobeRule = JSON.parse(JSON.stringify(vm.runInContext('WARDROBE_RULE_DEFAULTS', context)));
 const olderWardrobe = '⟦ГАРДЕРОБ⟧\n⟦ОДЕЖДА:Ада⟧ older\n⟦/ГАРДЕРОБ⟧';
 const newestWardrobe = 'scene\n⟦ГАРДЕРОБ⟧\n⟦ОДЕЖДА:Мира⟧ blue silk\n⟦ОДЕЖДА:Ада⟧ red coat\n⟦/ГАРДЕРОБ⟧';
 workerResult = null;
@@ -85,9 +89,9 @@ const css = read('style.css');
 const preview = read('preview.html');
 const manifest = JSON.parse(read('manifest.json'));
 
-assert.equal(manifest.version, '1.4.0');
+assert.equal(manifest.version, '1.4.1');
 assert.equal(manifest.auto_update, false);
-assert.match(indexSource, /v1\.4\.0 ready/);
+assert.match(indexSource, /v1\.4\.1 ready/);
 assert.equal((indexSource.match(/data-view="(?:gallery|create|settings)"/g) || []).length, 3, 'exactly three primary tabs');
 assert.match(indexSource, /data-mode="write"/);
 assert.match(indexSource, /data-mode="generate"/);
@@ -104,7 +108,8 @@ assert.match(indexSource, /rows="5"/);
 assert.match(indexSource, /fa-solid fa-shirt/);
 assert.doesNotMatch(indexSource, /openNameColorEditor/);
 assert.doesNotMatch(indexSource, /tagCreator|createInlineTag|openInlineTag|inlineTagCreatorHtml/);
-assert.match(indexSource, /GALLERY_FIRST = 48/);
+assert.match(indexSource, /GALLERY_FIRST = 24/);
+assert.match(indexSource, /GALLERY_MORE = 16/);
 assert.match(indexSource, /IntersectionObserver/);
 assert.match(indexSource, /loading="lazy"/);
 assert.match(indexSource, /operation: 'scanMany'/);
@@ -112,6 +117,9 @@ assert.match(indexSource, /operation: 'replaceEntry'/);
 assert.match(indexSource, /operation: 'append'/);
 assert.match(indexSource, /Наряд добавлен в регекс/);
 assert.match(indexSource, /message\?\.mes !== snapshot\.source/);
+assert.match(indexSource, /saveChatConditional/);
+assert.match(indexSource, /updateMessageDisplay/);
+assert.match(indexSource, /SillyTavern изменил сообщение во время сохранения/);
 assert.match(indexSource, /data-gallery-mode="active"/);
 assert.match(indexSource, /save-active-to-library/);
 assert.match(indexSource, /delete-active-outfit/);
@@ -149,6 +157,8 @@ assert.match(css, /\.nw-tag-search/);
 assert.match(css, /\.nw-gallery-mode-tabs/);
 assert.match(css, /\.nw-active-tabs/);
 assert.match(css, /overflow-x: auto/);
+assert.match(css, /\.nw-settings-tabs::\-webkit-scrollbar/);
+assert.match(css, /content-visibility: auto/);
 assert.match(css, /white-space: nowrap !important/);
 assert.match(css, /\.nw-panel,\s*\n\.nw-extension-settings,\s*\n\.nw-mini,/);
 assert.doesNotMatch(css, /nw-section-action|nw-inline-tag-fields|nw-field-title/);

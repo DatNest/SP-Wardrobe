@@ -416,6 +416,9 @@
     border: 1px solid var(--nw-border);
     border-radius: var(--SmartThemeBorderRadius, 8px);
     background: var(--nw-surface);
+    contain: layout paint style;
+    content-visibility: auto;
+    contain-intrinsic-size: 220px 330px;
 }
 
 .nw-outfit-apply {
@@ -935,7 +938,12 @@
     overflow-y: hidden;
     overscroll-behavior-inline: contain;
     scroll-snap-type: inline proximity;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    touch-action: pan-x;
+}
+
+.nw-settings-tabs::-webkit-scrollbar {
+    display: none;
 }
 
 .nw-settings-tab.menu_button {

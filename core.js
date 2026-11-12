@@ -49,6 +49,18 @@ export const DEFAULT_GENERATION_PROMPT = `Создай один практичн
 Верни только JSON:
 {"name":"короткое название наряда","description":"готовое описание одежды для вставки в пост"}`;
 
+const LEGACY_WARDROBE_PATTERN = '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)';
+
+export const WARDROBE_RULE_DEFAULTS = Object.freeze({
+    pattern: '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>[^\\r\\n]*(?:\\r?\\n(?!⟦(?:ОДЕЖДА:|/ГАРДЕРОБ⟧))[^\\r\\n]*)*)',
+    flags: 'gm',
+    nameGroup: 'name',
+    outfitGroup: 'outfit',
+    searchDepth: 20,
+    entryTemplate: '⟦ОДЕЖДА:{{name}}⟧ {{outfit}}',
+    closingMarker: '⟦/ГАРДЕРОБ⟧',
+});
+
 export const DEFAULT_SETTINGS = Object.freeze({
     version: 1,
     floating: {
@@ -58,15 +70,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     subjects: [],
     tags: [],
     outfits: [],
-    regex: {
-        pattern: '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)',
-        flags: 'gms',
-        nameGroup: 'name',
-        outfitGroup: 'outfit',
-        searchDepth: 20,
-        entryTemplate: '⟦ОДЕЖДА:{{name}}⟧ {{outfit}}',
-        closingMarker: '⟦/ГАРДЕРОБ⟧',
-    },
+    regex: WARDROBE_RULE_DEFAULTS,
     connection: { profileId: 'auto' },
     prompts: { scan: DEFAULT_SCAN_PROMPT, outfit: DEFAULT_GENERATION_PROMPT },
 });
@@ -183,8 +187,12 @@ export function emptyOutfit(subjectId = '') {
 
 export function normalizeRegexRule(value) {
     const source = value && typeof value === 'object' ? value : {};
-    let pattern = plainText(source.pattern, 4000);
-    let flags = plainText(source.flags, 8);
+    let pattern = plainText(source.pattern ?? WARDROBE_RULE_DEFAULTS.pattern, 4000);
+    let flags = plainText(source.flags ?? WARDROBE_RULE_DEFAULTS.flags, 8);
+    if (pattern === LEGACY_WARDROBE_PATTERN) {
+        pattern = WARDROBE_RULE_DEFAULTS.pattern;
+        if (flags === 'gms') flags = WARDROBE_RULE_DEFAULTS.flags;
+    }
     if (pattern.startsWith('/')) {
         const slash = pattern.lastIndexOf('/');
         const suffix = slash > 0 ? pattern.slice(slash + 1) : '';
@@ -196,11 +204,11 @@ export function normalizeRegexRule(value) {
     if (!/^[gimsu]*$/.test(flags) || new Set(flags).size !== flags.length) {
         throw new Error('Флаги могут содержать только g, i, m, s, u без повторов.');
     }
-    const nameGroup = plainText(source.nameGroup || 'name', 40).trim();
-    const outfitGroup = plainText(source.outfitGroup || 'outfit', 40).trim();
+    const nameGroup = plainText(source.nameGroup || WARDROBE_RULE_DEFAULTS.nameGroup, 40).trim();
+    const outfitGroup = plainText(source.outfitGroup || WARDROBE_RULE_DEFAULTS.outfitGroup, 40).trim();
     if (!nameGroup || !outfitGroup) throw new Error('Укажи группы имени и одежды.');
-    const entryTemplate = plainText(source.entryTemplate || '⟦ОДЕЖДА:{{name}}⟧ {{outfit}}', 2000).trim();
-    const closingMarker = plainText(source.closingMarker || '⟦/ГАРДЕРОБ⟧', 500).trim();
+    const entryTemplate = plainText(source.entryTemplate || WARDROBE_RULE_DEFAULTS.entryTemplate, 2000).trim();
+    const closingMarker = plainText(source.closingMarker || WARDROBE_RULE_DEFAULTS.closingMarker, 500).trim();
     if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
     if (!closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
     return {
@@ -208,7 +216,7 @@ export function normalizeRegexRule(value) {
         flags,
         nameGroup,
         outfitGroup,
-        searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, 20)),
+        searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, WARDROBE_RULE_DEFAULTS.searchDepth)),
         entryTemplate,
         closingMarker,
     };
@@ -371,9 +379,11 @@ function wardrobeRegexWorker() {
             if (operation === 'scanMany') {
                 const marker = String(closingMarker || rule.closingMarker || '');
                 for (const item of Array.isArray(texts) ? texts : []) {
+                    const hasMarker = marker ? String(item.text || '').includes(marker) : false;
+                    if (marker && !hasMarker) continue;
                     const entries = publicEntries(item.text);
-                    if (entries.length || (marker && String(item.text || '').includes(marker))) {
-                        self.postMessage({ entries, key: item.key, hasMarker: marker ? String(item.text || '').includes(marker) : false });
+                    if (entries.length || hasMarker) {
+                        self.postMessage({ entries, key: item.key, hasMarker });
                         return;
                     }
                 }
