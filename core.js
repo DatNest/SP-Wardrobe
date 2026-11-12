@@ -59,11 +59,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
     tags: [],
     outfits: [],
     regex: {
-        pattern: '',
+        pattern: '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)',
         flags: 'gms',
         nameGroup: 'name',
         outfitGroup: 'outfit',
         searchDepth: 20,
+        entryTemplate: '⟦ОДЕЖДА:{{name}}⟧ {{outfit}}',
+        closingMarker: '⟦/ГАРДЕРОБ⟧',
     },
     connection: { profileId: 'auto' },
     prompts: { scan: DEFAULT_SCAN_PROMPT, outfit: DEFAULT_GENERATION_PROMPT },
@@ -197,12 +199,18 @@ export function normalizeRegexRule(value) {
     const nameGroup = plainText(source.nameGroup || 'name', 40).trim();
     const outfitGroup = plainText(source.outfitGroup || 'outfit', 40).trim();
     if (!nameGroup || !outfitGroup) throw new Error('Укажи группы имени и одежды.');
+    const entryTemplate = plainText(source.entryTemplate || '⟦ОДЕЖДА:{{name}}⟧ {{outfit}}', 2000).trim();
+    const closingMarker = plainText(source.closingMarker || '⟦/ГАРДЕРОБ⟧', 500).trim();
+    if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
+    if (!closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
     return {
         pattern,
         flags,
         nameGroup,
         outfitGroup,
         searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, 20)),
+        entryTemplate,
+        closingMarker,
     };
 }
 
@@ -307,7 +315,6 @@ export function readExport(value) {
 }
 
 function wardrobeRegexWorker() {
-    const normalize = value => String(value || '').normalize('NFC').replace(/\s+/gu, ' ').trim().toLocaleLowerCase().replace(/[’']/gu, "'");
     const getGroup = (match, key) => /^\d+$/.test(key) ? match[Number(key)] : match.groups?.[key];
     const getIndices = (match, key) => {
         if (!match.indices) return null;
@@ -323,16 +330,14 @@ function wardrobeRegexWorker() {
     };
     self.onmessage = event => {
         try {
-            const { operation, text, texts, rule, targetNames, replacement } = event.data || {};
+            const { operation, text, texts, rule, replacement, entryIndex, entryText, closingMarker } = event.data || {};
             compile(rule);
             if (operation === 'validate') {
                 self.postMessage({ valid: true });
                 return;
             }
-            const wanted = new Set((targetNames || []).map(normalize).filter(Boolean));
-            const replaceOne = source => {
-                const ranges = [];
-                const names = [];
+            const inspectOne = source => {
+                const entries = [];
                 let inspected = 0;
                 for (const match of String(source || '').matchAll(compile(rule))) {
                     if (++inspected > 1000) throw new Error('В одном посте найдено больше 1000 совпадений. Уточни правило.');
@@ -341,34 +346,68 @@ function wardrobeRegexWorker() {
                     const outfit = getGroup(match, rule.outfitGroup);
                     if (person === undefined) throw new Error(`Не найдена группа имени: ${rule.nameGroup}`);
                     if (outfit === undefined) throw new Error(`Не найдена группа одежды: ${rule.outfitGroup}`);
-                    if (!wanted.has(normalize(person))) continue;
-                    let range = getIndices(match, rule.outfitGroup);
-                    if (!range) {
+                    let outfitRange = getIndices(match, rule.outfitGroup);
+                    if (!outfitRange) {
                         const first = match[0].indexOf(String(outfit));
                         const last = match[0].lastIndexOf(String(outfit));
                         if (first < 0 || first !== last) throw new Error('Не удалось однозначно найти одежду внутри совпадения. Сделай группу одежды точнее.');
-                        range = [match.index + first, match.index + first + String(outfit).length];
+                        outfitRange = [match.index + first, match.index + first + String(outfit).length];
                     }
-                    if (ranges.some(item => range[0] < item[1] && range[1] > item[0])) throw new Error('Группы одежды пересекаются. Уточни правило.');
-                    ranges.push(range);
-                    names.push(String(person).trim());
+                    entries.push({
+                        index: entries.length,
+                        name: String(person).trim(),
+                        outfit: String(outfit).trim(),
+                        outfitRange,
+                        matchRange: [match.index, match.index + match[0].length],
+                    });
                 }
-                let result = String(source || '');
-                for (const [start, end] of ranges.sort((a, b) => b[0] - a[0])) result = result.slice(0, start) + String(replacement || '') + result.slice(end);
-                return { text: result, count: ranges.length, names };
+                return entries;
             };
-            if (operation === 'replaceMany') {
+            const publicEntries = source => inspectOne(source).map(({ index, name, outfit }) => ({ index, name, outfit }));
+            if (operation === 'scan') {
+                self.postMessage({ entries: publicEntries(text) });
+                return;
+            }
+            if (operation === 'scanMany') {
+                const marker = String(closingMarker || rule.closingMarker || '');
                 for (const item of Array.isArray(texts) ? texts : []) {
-                    const result = replaceOne(item.text);
-                    if (result.count) {
-                        self.postMessage({ ...result, key: item.key });
+                    const entries = publicEntries(item.text);
+                    if (entries.length || (marker && String(item.text || '').includes(marker))) {
+                        self.postMessage({ entries, key: item.key, hasMarker: marker ? String(item.text || '').includes(marker) : false });
                         return;
                     }
                 }
-                self.postMessage({ text: '', count: 0, names: [], key: null });
+                self.postMessage({ entries: [], key: null, hasMarker: false });
                 return;
             }
-            self.postMessage(replaceOne(text));
+            if (operation === 'replaceEntry' || operation === 'deleteEntry') {
+                const source = String(text || '');
+                const entries = inspectOne(source);
+                const entry = entries[Number(entryIndex)];
+                if (!entry) throw new Error('Наряд уже изменился или больше не найден. Обнови список.');
+                let [start, end] = operation === 'replaceEntry' ? entry.outfitRange : entry.matchRange;
+                if (operation === 'deleteEntry') {
+                    if (source.slice(end, end + 2) === '\r\n') end += 2;
+                    else if (source[end] === '\n' || source[end] === '\r') end += 1;
+                    else if (start > 0 && source.slice(start - 2, start) === '\r\n') start -= 2;
+                    else if (start > 0 && (source[start - 1] === '\n' || source[start - 1] === '\r')) start -= 1;
+                }
+                self.postMessage({ text: source.slice(0, start) + (operation === 'replaceEntry' ? String(replacement || '') : '') + source.slice(end), count: 1, names: [entry.name] });
+                return;
+            }
+            if (operation === 'append') {
+                const source = String(text || '');
+                const marker = String(closingMarker || rule.closingMarker || '');
+                const position = marker ? source.lastIndexOf(marker) : -1;
+                if (position < 0) throw new Error('В выбранном посте не найден маркер конца гардероба.');
+                const row = String(entryText || '').trim();
+                if (!row) throw new Error('Шаблон новой строки получился пустым.');
+                const before = source.slice(0, position);
+                const separator = before && !/[\r\n]$/.test(before) ? '\n' : '';
+                self.postMessage({ text: before + separator + row + '\n' + source.slice(position), count: 1, names: [] });
+                return;
+            }
+            throw new Error('Неизвестная операция с правилом гардероба.');
         } catch (error) {
             self.postMessage({ error: String(error?.message || error) });
         }

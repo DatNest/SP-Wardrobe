@@ -37,6 +37,8 @@ assert.equal(normalized.subjects[0].color, '#aabbcc');
 assert.deepEqual(JSON.parse(JSON.stringify(normalized.subjects[0].aliases)), ['Ada']);
 assert.deepEqual(JSON.parse(JSON.stringify(normalized.outfits[0].tagIds)), ['winter']);
 assert.equal(normalized.regex.searchDepth, 100);
+assert.equal(normalized.regex.entryTemplate, '⟦ОДЕЖДА:{{name}}⟧ {{outfit}}');
+assert.equal(normalized.regex.closingMarker, '⟦/ГАРДЕРОБ⟧');
 
 const roundTrip = vm.runInContext('readExport(makeExport(normalizeSettings(DEFAULT_SETTINGS)))', context);
 assert.equal(roundTrip.version, 1);
@@ -44,35 +46,38 @@ assert.equal(roundTrip.connection.profileId, 'auto');
 assert.equal(roundTrip.prompts.scan.includes('{{world}}'), true);
 assert.equal(roundTrip.prompts.scan.includes('{{posts}}'), true);
 assert.equal(roundTrip.prompts.outfit.includes('{{scan}}'), true);
+assert.match(roundTrip.regex.pattern, /⟦ОДЕЖДА:/);
+assert.equal(roundTrip.regex.flags, 'gms');
 assert.equal(vm.runInContext(`parseScanResult('{"summary":"Осень, дорога, холод"}')`, context), 'Осень, дорога, холод');
 
 let workerResult = null;
 context.self = { postMessage: value => { workerResult = value; } };
 vm.runInContext('wardrobeRegexWorker()', context);
-context.self.onmessage({ data: {
-    operation: 'replaceMany',
-    texts: [
-        { key: 9, text: '[Mia|blue coat]\n[Ada|old dress]' },
-        { key: 8, text: '[Ada|older dress]' },
-    ],
-    rule: { pattern: '\\[(?<name>[^|]+)\\|(?<outfit>[^\\]]+)\\]', flags: 'g', nameGroup: 'name', outfitGroup: 'outfit' },
-    targetNames: ['Ada'],
-    replacement: 'new linen outfit',
-} });
-assert.equal(workerResult.count, 1);
-assert.equal(workerResult.key, 9);
-assert.equal(workerResult.text, '[Mia|blue coat]\n[Ada|new linen outfit]');
-assert.deepEqual(JSON.parse(JSON.stringify(workerResult.names)), ['Ada']);
+const wardrobeRule = {
+    pattern: '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)',
+    flags: 'gms', nameGroup: 'name', outfitGroup: 'outfit', closingMarker: '⟦/ГАРДЕРОБ⟧',
+};
+const olderWardrobe = '⟦ГАРДЕРОБ⟧\n⟦ОДЕЖДА:Ада⟧ older\n⟦/ГАРДЕРОБ⟧';
+const newestWardrobe = 'scene\n⟦ГАРДЕРОБ⟧\n⟦ОДЕЖДА:Мира⟧ blue silk\n⟦ОДЕЖДА:Ада⟧ red coat\n⟦/ГАРДЕРОБ⟧';
+workerResult = null;
+context.self.onmessage({ data: { operation: 'scanMany', texts: [{ key: 14, text: 'plain post' }, { key: 13, text: newestWardrobe }, { key: 12, text: olderWardrobe }], rule: wardrobeRule, closingMarker: wardrobeRule.closingMarker } });
+assert.equal(workerResult.key, 13, 'scan chooses the newest wardrobe post inside the configured range');
+assert.equal(workerResult.entries.length, 2);
+assert.equal(workerResult.entries[1].name, 'Ада');
 
 workerResult = null;
-context.self.onmessage({ data: {
-    operation: 'replace',
-    text: '<w><n>Ada</n><o>red</o></w>',
-    rule: { pattern: '<w><n>([^<]+)</n><o>([^<]+)</o></w>', flags: '', nameGroup: '1', outfitGroup: '2' },
-    targetNames: ['Ada'],
-    replacement: 'green',
-} });
-assert.equal(workerResult.text, '<w><n>Ada</n><o>green</o></w>');
+context.self.onmessage({ data: { operation: 'replaceEntry', text: newestWardrobe, rule: wardrobeRule, entryIndex: 1, replacement: 'new linen outfit' } });
+assert.match(workerResult.text, /⟦ОДЕЖДА:Ада⟧ new linen outfit/);
+assert.match(workerResult.text, /⟦ОДЕЖДА:Мира⟧ blue silk/);
+
+workerResult = null;
+context.self.onmessage({ data: { operation: 'deleteEntry', text: newestWardrobe, rule: wardrobeRule, entryIndex: 0 } });
+assert.doesNotMatch(workerResult.text, /Мира/);
+assert.match(workerResult.text, /Ада/);
+
+workerResult = null;
+context.self.onmessage({ data: { operation: 'append', text: newestWardrobe, rule: wardrobeRule, entryText: '⟦ОДЕЖДА:Тоф⟧ green tunic', closingMarker: wardrobeRule.closingMarker } });
+assert.match(workerResult.text, /⟦ОДЕЖДА:Тоф⟧ green tunic\n⟦\/ГАРДЕРОБ⟧/);
 
 const indexSource = read('index.js');
 const generationSource = read('generation.js');
@@ -80,9 +85,9 @@ const css = read('style.css');
 const preview = read('preview.html');
 const manifest = JSON.parse(read('manifest.json'));
 
-assert.equal(manifest.version, '1.3.0');
+assert.equal(manifest.version, '1.4.0');
 assert.equal(manifest.auto_update, false);
-assert.match(indexSource, /v1\.3\.0 ready/);
+assert.match(indexSource, /v1\.4\.0 ready/);
 assert.equal((indexSource.match(/data-view="(?:gallery|create|settings)"/g) || []).length, 3, 'exactly three primary tabs');
 assert.match(indexSource, /data-mode="write"/);
 assert.match(indexSource, /data-mode="generate"/);
@@ -102,8 +107,19 @@ assert.doesNotMatch(indexSource, /tagCreator|createInlineTag|openInlineTag|inlin
 assert.match(indexSource, /GALLERY_FIRST = 48/);
 assert.match(indexSource, /IntersectionObserver/);
 assert.match(indexSource, /loading="lazy"/);
-assert.match(indexSource, /operation: 'replaceMany'/);
-assert.match(indexSource, /message\.mes !== before/);
+assert.match(indexSource, /operation: 'scanMany'/);
+assert.match(indexSource, /operation: 'replaceEntry'/);
+assert.match(indexSource, /operation: 'append'/);
+assert.match(indexSource, /Наряд добавлен в регекс/);
+assert.match(indexSource, /message\?\.mes !== snapshot\.source/);
+assert.match(indexSource, /data-gallery-mode="active"/);
+assert.match(indexSource, /save-active-to-library/);
+assert.match(indexSource, /delete-active-outfit/);
+assert.match(indexSource, /nw-regex-entry-template/);
+assert.match(indexSource, /nw-regex-closing-marker/);
+assert.match(indexSource, /add-image-url/);
+assert.match(indexSource, /paste-image/);
+assert.match(indexSource, /imageFileFromUrl/);
 assert.match(indexSource, /generationController\?\.abort/);
 assert.match(indexSource, /disposeGalleryObserver/);
 assert.match(coreSource, /new Worker\(url\)/);
@@ -130,10 +146,14 @@ assert.match(css, /\.nw-inline-creator/);
 assert.match(css, /\.nw-tag-pill/);
 assert.match(css, /border-radius: 999px/);
 assert.match(css, /\.nw-tag-search/);
+assert.match(css, /\.nw-gallery-mode-tabs/);
+assert.match(css, /\.nw-active-tabs/);
+assert.match(css, /overflow-x: auto/);
 assert.match(css, /white-space: nowrap !important/);
 assert.match(css, /\.nw-panel,\s*\n\.nw-extension-settings,\s*\n\.nw-mini,/);
 assert.doesNotMatch(css, /nw-section-action|nw-inline-tag-fields|nw-field-title/);
 assert.equal((preview.match(/data-preview-tab=/g) || []).length, 3, 'preview exposes all three tabs');
+assert.equal((preview.match(/data-preview-settings-tab=/g) || []).length, 7, 'preview exposes all settings tabs');
 assert.match(preview, /data-preview-mode="write"/);
 assert.match(preview, /data-preview-mode="generate"/);
 assert.match(preview, /Подключение к модели/);

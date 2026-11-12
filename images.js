@@ -60,3 +60,42 @@ export async function prepareImage(file, maxSide = 1280) {
         decoded.release();
     }
 }
+
+export async function imageFileFromUrl(value, signal) {
+    let url;
+    try { url = new URL(String(value || '').trim()); }
+    catch { throw new Error('Вставь полную ссылку на изображение, начинающуюся с http:// или https://.'); }
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Поддерживаются только ссылки http:// и https://.');
+
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, { once: true });
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    try {
+        let response;
+        try {
+            response = await fetch(url.href, {
+                signal: controller.signal,
+                credentials: 'omit',
+                referrerPolicy: 'no-referrer',
+                cache: 'no-store',
+            });
+        } catch (error) {
+            if (controller.signal.aborted) throw new Error('Загрузка изображения отменена или заняла больше 20 секунд.');
+            throw new Error('Сайт не разрешил загрузить изображение. Попробуй прямую ссылку на файл или сохрани его на устройство.');
+        }
+        if (!response.ok) throw new Error(`Ссылка вернула ошибку HTTP ${response.status}.`);
+        const declaredSize = Number(response.headers.get('content-length') || 0);
+        if (declaredSize > 12 * 1024 * 1024) throw new Error('Изображение по ссылке больше 12 МБ.');
+        const blob = await response.blob();
+        if (!String(blob.type || '').startsWith('image/')) throw new Error('По ссылке получен не файл изображения.');
+        if (blob.size > 12 * 1024 * 1024) throw new Error('Изображение по ссылке больше 12 МБ.');
+        const pathName = decodeURIComponent(url.pathname.split('/').pop() || 'image').slice(0, 100);
+        const fileName = /\.[a-z\d]{2,5}$/i.test(pathName) ? pathName : `${pathName || 'image'}.${blob.type.split('/')[1] || 'img'}`;
+        return typeof File === 'function' ? new File([blob], fileName, { type: blob.type }) : Object.assign(blob, { name: fileName });
+    } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+    }
+}
