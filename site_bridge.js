@@ -171,6 +171,23 @@ export function addOutfitToWebsiteData(data, { outfit, subject, shelfName, image
     return { data: next, itemId: id, characterId: character.id, categoryId: category.id };
 }
 
+export function addLibraryLookToWebsiteData(data, look) {
+    const next = normalizeWebsiteData(data);
+    const id = cleanText(look?.id, 160);
+    const name = cleanText(look?.name, 120);
+    const desc = cleanText(look?.desc);
+    if (!id || !name || !desc) throw new Error('У записи библиотеки должны быть имя и заполненная внешность.');
+    const names = new Set([name, ...(Array.isArray(look.aliases) ? look.aliases : [])].map(comparable).filter(Boolean));
+    const matches = next.looks.map((item, index) => ({ item, index })).filter(({ item }) => String(item.id) === id || names.has(comparable(item.name)));
+    const record = { ...(matches[0]?.item || {}), id, name, desc };
+    if (matches.length) {
+        const matched = new Set(matches.map(({ index }) => index));
+        next.looks = next.looks.filter((_, index) => !matched.has(index));
+        next.looks.unshift(record);
+    } else next.looks.unshift(record);
+    return { data: next, lookId: id, updated: matches.length > 0 };
+}
+
 export async function exportOutfitToWebsite(config, payload, fetchImpl = fetch) {
     if (!String(config?.token || '').trim()) throw new Error('Введи токен GitHub в разделе «Сайт».');
     const image = imagePayload(payload?.outfit?.images?.[0]?.dataUrl);
@@ -182,4 +199,13 @@ export async function exportOutfitToWebsite(config, payload, fetchImpl = fetch) 
     const merged = addOutfitToWebsiteData(data, { ...payload, imagePath });
     await putGithubFile(config, DATA_FILE, encodeBase64Utf8(`${JSON.stringify(merged.data, null, 1)}\n`), `Add outfit ${payload.outfit.name || payload.outfit.id || stamp}`, current?.sha, fetchImpl);
     return { ...merged, imagePath };
+}
+
+export async function exportLibraryLookToWebsite(config, look, fetchImpl = fetch) {
+    if (!String(config?.token || '').trim()) throw new Error('Введи токен GitHub в разделе «Библиотека».');
+    const current = await readGithubFile(config, DATA_FILE, fetchImpl, true);
+    const data = current ? parseWebsiteJson(current.text) : normalizeWebsiteData({});
+    const merged = addLibraryLookToWebsiteData(data, look);
+    await putGithubFile(config, DATA_FILE, encodeBase64Utf8(`${JSON.stringify(merged.data, null, 1)}\n`), `${merged.updated ? 'Update' : 'Add'} appearance ${look.name}`, current?.sha, fetchImpl);
+    return merged;
 }

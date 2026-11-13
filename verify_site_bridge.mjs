@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+    addLibraryLookToWebsiteData,
     addOutfitToWebsiteData,
     exportOutfitToWebsite,
     imagePayload,
@@ -39,6 +40,14 @@ assert.deepEqual(first.data.looks, base.looks);
 const second = addOutfitToWebsiteData(first.data, { ...payload, imagePath: 'images/coat-new.webp' });
 assert.equal(second.data.items.length, 1, 'repeat export updates the same outfit');
 assert.equal(second.data.items[0].img, 'images/coat-new.webp');
+const withLook = addLibraryLookToWebsiteData(base, { id: 'ness_ada', name: 'Ада', aliases: ['Ada'], desc: 'blue eyes' });
+assert.equal(withLook.data.looks.length, 1);
+assert.equal(withLook.data.looks[0].id, 'ness_ada');
+assert.equal(withLook.data.looks[0].desc, 'blue eyes');
+assert.equal(withLook.updated, true);
+const deduplicatedLook = addLibraryLookToWebsiteData({ ...base, looks: [...base.looks, { id: 'duplicate', name: 'Ada', desc: 'duplicate' }] }, { id: 'ness_ada', name: 'Ада', aliases: ['Ada'], desc: 'green eyes' });
+assert.equal(deduplicatedLook.data.looks.length, 1);
+assert.equal(deduplicatedLook.data.looks[0].desc, 'green eyes');
 
 let saved = 0;
 const block = { id: 'b1', name: 'nai_imagen', block_type: 'generated', context: [] };

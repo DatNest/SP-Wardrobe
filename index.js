@@ -30,8 +30,9 @@ import {
 } from './core.js';
 import { generateOutfit, listConnectionProfiles, testConnectionProfile } from './generation.js';
 import { imageFileFromUrl, prepareImage } from './images.js';
-import { exportOutfitToWebsite, loadWebsiteData, websiteLooks } from './site_bridge.js';
+import { exportLibraryLookToWebsite, exportOutfitToWebsite, loadWebsiteData, websiteLooks } from './site_bridge.js';
 import { getWebsiteToken, setWebsiteToken } from './site_token.js';
+import { readNessLibrary, splitWebsiteLooks } from './ness_library_bridge.js';
 import {
     DEFAULT_LOOK_TEMPLATE,
     extBlockLookState,
@@ -49,7 +50,7 @@ const SETTINGS_TABS = [
     { id: 'subjects', label: 'Персонажи', icon: 'fa-users' },
     { id: 'tags', label: 'Теги', icon: 'fa-tags' },
     { id: 'connection', label: 'Подключение', icon: 'fa-plug' },
-    { id: 'website', label: 'Сайт', icon: 'fa-cloud-arrow-up' },
+    { id: 'website', label: 'Библиотека', icon: 'fa-book-open' },
     { id: 'insertion', label: 'Вставка', icon: 'fa-code' },
     { id: 'scan', label: 'Сканирование', icon: 'fa-magnifying-glass' },
     { id: 'generation', label: 'Генерация', icon: 'fa-wand-magic-sparkles' },
@@ -96,6 +97,7 @@ const ui = {
     status: '',
     connectionStatus: '',
     websiteLooks: [],
+    websiteLoaded: false,
     websiteStatus: '',
     websiteLoading: false,
 };
@@ -508,25 +510,50 @@ function extBlockOptionsHtml() {
     return targets.map(target => `<option value="${escapeHtml(target.ref)}" ${selected?.ref === target.ref ? 'selected' : ''}>${escapeHtml(target.label)}</option>`).join('');
 }
 
-function websiteLookCardHtml(look) {
+function currentNessLibrary() {
+    try { return { ...readNessLibrary(getContext()), error: '' }; }
+    catch (error) { return { available: false, records: [], error: String(error.message || error) }; }
+}
+
+function libraryLookIsOnWebsite(look) {
+    const names = new Set([look.name, ...(look.aliases || [])].map(comparableName));
+    return ui.websiteLooks.some(item => item.id === look.id || names.has(comparableName(item.name)));
+}
+
+function availableAppearance(id) {
+    return currentNessLibrary().records.find(look => look.id === id) || ui.websiteLooks.find(look => look.id === id);
+}
+
+function websiteLookCardHtml(look, { library = false, onWebsite = false } = {}) {
     const target = selectedExtBlockTarget();
     const state = target ? extBlockLookState(target.block, look) : { present: false, disabled: false };
-    const status = state.present ? `<span class="nw-site-look-state"><i class="fa-solid ${state.disabled ? 'fa-eye-slash' : 'fa-circle-check'}"></i>${state.disabled ? 'выключена' : 'в блоке'}</span>` : '';
-    return `<article class="nw-site-look${state.disabled ? ' disabled' : ''}" data-look-id="${escapeHtml(look.id)}"><div class="nw-site-look-head"><strong>${escapeHtml(look.name)}</strong>${status}</div><div class="nw-site-look-desc">${look.desc ? escapeHtml(look.desc) : '<i>Описания пока нет</i>'}</div><div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="site-look-send" data-look-id="${escapeHtml(look.id)}" ${look.desc && target ? '' : 'disabled'}><i class="fa-solid fa-paper-plane"></i><span>${state.present ? 'Обновить в блоке' : 'В Context Builder'}</span></button>${state.present ? `<button class="menu_button fa-fw" data-action="site-look-toggle" data-look-id="${escapeHtml(look.id)}" title="${state.disabled ? 'Включить' : 'Выключить'}"><i class="fa-solid ${state.disabled ? 'fa-eye' : 'fa-eye-slash'}"></i></button><button class="menu_button fa-fw" data-action="site-look-remove" data-look-id="${escapeHtml(look.id)}" title="Убрать из блока"><i class="fa-solid fa-trash"></i></button>` : ''}</div></article>`;
+    const contextState = state.present ? `<span class="nw-site-look-state"><i class="fa-solid ${state.disabled ? 'fa-eye-slash' : 'fa-circle-check'}"></i>${state.disabled ? 'выключена' : 'в блоке'}</span>` : '';
+    const siteState = library && ui.websiteLoaded ? `<span class="nw-site-look-state"><i class="fa-solid ${onWebsite ? 'fa-cloud' : 'fa-cloud-arrow-up'}"></i>${onWebsite ? 'на сайте' : 'ещё не на сайте'}</span>` : '';
+    return `<article class="nw-site-look${state.disabled ? ' disabled' : ''}" data-look-id="${escapeHtml(look.id)}"><div class="nw-site-look-head"><div><strong>${escapeHtml(look.name)}</strong>${library ? `<small>${look.type === 'persona' ? 'Персона' : 'Персонаж'} · NESS Library</small>` : '<small>Только на сайте</small>'}</div><div class="nw-site-look-states">${siteState}${contextState}</div></div><div class="nw-site-look-desc">${look.desc ? escapeHtml(look.desc) : '<i>Описания пока нет</i>'}</div><div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="site-look-send" data-look-id="${escapeHtml(look.id)}" ${look.desc && target ? '' : 'disabled'}><i class="fa-solid fa-paper-plane"></i><span>${state.present ? 'Обновить в блоке' : 'В Context Builder'}</span></button>${library ? `<button class="menu_button menu_button_icon" data-action="export-library-look-site" data-look-id="${escapeHtml(look.id)}"><i class="fa-solid fa-cloud-arrow-up"></i><span>${onWebsite ? 'Обновить сайт' : 'На сайт'}</span></button>` : ''}${state.present ? `<button class="menu_button fa-fw" data-action="site-look-toggle" data-look-id="${escapeHtml(look.id)}" title="${state.disabled ? 'Включить' : 'Выключить'}"><i class="fa-solid ${state.disabled ? 'fa-eye' : 'fa-eye-slash'}"></i></button><button class="menu_button fa-fw" data-action="site-look-remove" data-look-id="${escapeHtml(look.id)}" title="Убрать из блока"><i class="fa-solid fa-trash"></i></button>` : ''}</div></article>`;
 }
 
 function websiteSettingsPaneHtml() {
     const website = settings.website;
-    const looks = ui.websiteLooks.map(websiteLookCardHtml).join('');
-    return `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Сайт-гардероб</strong><small>Загружает внешности с сайта и отправляет сохранённые наряды вместе с обложкой обратно на GitHub.</small></div>${ui.websiteLoading ? '<span>загрузка…</span>' : ''}</div>
+    const library = currentNessLibrary();
+    const libraryLooks = library.records.map(look => websiteLookCardHtml(look, { library: true, onWebsite: libraryLookIsOnWebsite(look) })).join('');
+    const websiteOnly = splitWebsiteLooks(library.records, ui.websiteLooks);
+    const websiteOnlyLooks = websiteOnly.map(look => websiteLookCardHtml(look)).join('');
+    const libraryEmpty = library.error
+        ? emptyHtml('Библиотека не прочитана', library.error)
+        : emptyHtml('В NESS Library пока нет внешностей', library.available ? 'Заполни постоянную внешность в профиле «📚 Ness Library» и сохрани библиотеку.' : 'Сначала открой профиль «📚 Ness Library» и сохрани библиотеку.');
+    const websiteEmpty = ui.websiteLoaded
+        ? emptyHtml('Отдельных внешностей на сайте нет', 'Все внешности сайта уже совпадают с NESS Library.')
+        : emptyHtml('Сайт ещё не загружен', 'Сохрани адрес и нажми «Обновить данные сайта».');
+    return `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>NESS Library и сайт</strong><small>Основной источник внешности — ваша общая библиотека. Сайт хранит опубликованные копии и отдельные записи.</small></div>${ui.websiteLoading ? '<span>загрузка…</span>' : ''}</div>
         <label><span>Адрес сайта</span><input id="nw-website-url" class="text_pole" type="url" inputmode="url" placeholder="https://логин.github.io/wardrobe/" value="${escapeHtml(website.siteUrl)}"><small>Для чтения внешностей достаточно этого адреса.</small></label>
         <div class="nw-settings-grid"><label><span>Логин GitHub</span><input id="nw-website-user" class="text_pole" autocomplete="off" value="${escapeHtml(website.githubUser)}"></label><label><span>Репозиторий</span><input id="nw-website-repo" class="text_pole" autocomplete="off" placeholder="wardrobe" value="${escapeHtml(website.githubRepo)}"></label></div>
         <label><span>Токен GitHub</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="off" placeholder="Нужен только для отправки нарядов" value="${escapeHtml(getWebsiteToken())}"><small>Хранится только в этом браузере и не попадает в резервную копию NESS Wardrobe.</small></label>
         <label><span>Context Builder блока ExtBlocks</span><select id="nw-website-extblock" class="text_pole">${extBlockOptionsHtml()}</select></label>
         <details class="nw-site-template"><summary>Шаблон записи внешности</summary><textarea id="nw-website-look-template" class="text_pole nw-code-field" rows="5" maxlength="20000">${escapeHtml(website.lookTemplate || DEFAULT_LOOK_TEMPLATE)}</textarea><small>{{name}} — имя, {{desc}} — описание внешности целиком.</small><button class="menu_button" data-action="reset-look-template">Вернуть стандартный текст</button></details>
-        <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить подключение</span></button><button class="menu_button menu_button_icon" data-action="load-website-looks"><i class="fa-solid fa-rotate"></i><span>Загрузить внешности</span></button></div>
+        <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить подключение</span></button><button class="menu_button menu_button_icon" data-action="load-website-looks"><i class="fa-solid fa-rotate"></i><span>Обновить данные сайта</span></button></div>
         <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.websiteStatus)}</div>
-        <section class="nw-site-looks"><div class="nw-settings-pane-head"><div><strong>Внешности с сайта</strong><small>Повторная отправка обновляет прежний пункт, а не создаёт дубль.</small></div><span class="nw-counter">${ui.websiteLooks.length}</span></div>${looks || emptyHtml('Внешности не загружены', 'Сохрани адрес сайта и нажми «Загрузить внешности».')}</section>
+        <section class="nw-site-looks nw-library-primary"><div class="nw-settings-pane-head"><div><strong>Из NESS Library</strong><small>Эти записи главные. Теги собраны через запятую; области тела идут отдельными абзацами с английскими заголовками.</small></div><span class="nw-counter">${library.records.length}</span></div>${libraryLooks || libraryEmpty}</section>
+        <details class="nw-site-only"><summary>Внешности только на сайте <span class="nw-counter">${websiteOnly.length}</span></summary><div class="nw-site-looks">${websiteOnlyLooks || websiteEmpty}</div></details>
     </section>`;
 }
 
@@ -722,6 +749,7 @@ async function loadWebsiteLooks() {
         const data = await loadWebsiteData(websiteRequestConfig(controller.signal));
         if (controller.signal.aborted || ownRevision !== operationRevision) return;
         ui.websiteLooks = websiteLooks(data);
+        ui.websiteLoaded = true;
         ui.websiteStatus = ui.websiteLooks.length ? `Загружено внешностей: ${ui.websiteLooks.length}.` : 'На сайте пока нет внешностей.';
     } catch (error) {
         if (!controller.signal.aborted && ownRevision === operationRevision) ui.websiteStatus = `Не удалось загрузить: ${error.message || error}`;
@@ -734,12 +762,8 @@ async function loadWebsiteLooks() {
     }
 }
 
-function findWebsiteLook(id) {
-    return ui.websiteLooks.find(look => look.id === id);
-}
-
 async function sendLookFromWebsite(id) {
-    const look = findWebsiteLook(id);
+    const look = availableAppearance(id);
     const target = selectedExtBlockTarget();
     if (!look || !target) return notify('Не выбрана внешность или блок ExtBlocks.', 'warning');
     try {
@@ -756,7 +780,7 @@ async function sendLookFromWebsite(id) {
 }
 
 async function toggleLookFromWebsite(id) {
-    const look = findWebsiteLook(id);
+    const look = availableAppearance(id);
     const target = selectedExtBlockTarget();
     if (!look || !target) return;
     await toggleWebsiteLook(getContext(), target, look);
@@ -764,12 +788,45 @@ async function toggleLookFromWebsite(id) {
 }
 
 async function removeLookFromWebsite(id) {
-    const look = findWebsiteLook(id);
+    const look = availableAppearance(id);
     const target = selectedExtBlockTarget();
     if (!look || !target) return;
     await removeWebsiteLook(getContext(), target, look);
     ui.websiteStatus = `«${look.name}» убрана из Context Builder.`;
     render();
+}
+
+async function exportLibraryAppearanceToWebsite(id) {
+    const look = currentNessLibrary().records.find(record => record.id === id);
+    if (!look) return notify('Запись больше не найдена в NESS Library. Обнови окно.', 'warning');
+    if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) {
+        notify('Сначала заполни GitHub в Настройки → Библиотека.', 'warning');
+        return;
+    }
+    siteController?.abort();
+    const controller = new AbortController();
+    const revision = operationRevision;
+    siteController = controller;
+    ui.websiteStatus = `Отправляю внешность «${look.name}» на сайт…`;
+    setMessage('nw-settings-status', ui.websiteStatus);
+    $('[data-action="export-library-look-site"]').prop('disabled', true);
+    try {
+        const result = await exportLibraryLookToWebsite(websiteRequestConfig(controller.signal), look);
+        if (controller.signal.aborted || revision !== operationRevision) return;
+        ui.websiteLooks = websiteLooks(result.data);
+        ui.websiteLoaded = true;
+        ui.websiteStatus = result.updated ? `Внешность «${look.name}» обновлена на сайте.` : `Внешность «${look.name}» добавлена на сайт.`;
+        notify(ui.websiteStatus, 'success');
+        render();
+    } catch (error) {
+        if (!controller.signal.aborted) {
+            ui.websiteStatus = `Не удалось отправить внешность: ${error.message || error}`;
+            setMessage('nw-settings-status', ui.websiteStatus);
+        }
+    } finally {
+        if (siteController === controller) siteController = null;
+        $('[data-action="export-library-look-site"]').prop('disabled', false);
+    }
 }
 
 async function exportSavedOutfitToWebsite(outfitId) {
@@ -778,7 +835,7 @@ async function exportSavedOutfitToWebsite(outfitId) {
     if (!outfit || !subject) return notify('Сначала сохрани наряд и выбери, для кого он.', 'warning');
     if (!outfit.images[0]) return notify('Добавь наряду обложку перед отправкой на сайт.', 'warning');
     if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) {
-        notify('Сначала заполни GitHub в Настройки → Сайт.', 'warning');
+        notify('Сначала заполни GitHub в Настройки → Библиотека.', 'warning');
         return;
     }
     const suggestedShelf = outfit.tagIds.map(id => findTag(id)?.name).find(Boolean) || 'Образы';
@@ -1529,6 +1586,7 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="load-website-looks"]', () => void loadWebsiteLooks());
     $(document).on(`change${NS}`, '#nw-website-extblock', function () { settings.website.extBlockRef = this.value; settings.website.extBlockName = listExtBlockTargets(getContext()).find(target => target.ref === this.value)?.block?.name || settings.website.extBlockName; commitSettings(); render(); });
     $(document).on(`click${NS}`, '[data-action="site-look-send"]', function () { void sendLookFromWebsite(this.dataset.lookId); });
+    $(document).on(`click${NS}`, '[data-action="export-library-look-site"]', function () { void exportLibraryAppearanceToWebsite(this.dataset.lookId); });
     $(document).on(`click${NS}`, '[data-action="site-look-toggle"]', function () { void toggleLookFromWebsite(this.dataset.lookId); });
     $(document).on(`click${NS}`, '[data-action="site-look-remove"]', function () { void removeLookFromWebsite(this.dataset.lookId); });
     $(document).on(`change${NS}`, '[data-subject-field]', function () { const row = this.closest('[data-subject-id]'); const subject = findSubject(row?.dataset.subjectId); if (!subject) return; const field = this.dataset.subjectField; if (field === 'name') { subject.name = normalizeName(this.value) || subject.name; this.value = subject.name; } if (field === 'type') subject.type = this.value === 'persona' ? 'persona' : 'character'; if (field === 'color') subject.color = normalizeColor(this.value, subject.color); commitSettings(); });
@@ -1578,7 +1636,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.5.0 ready');
+        console.log('[NESS Wardrobe] v1.6.0 ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');
