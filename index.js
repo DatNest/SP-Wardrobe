@@ -30,6 +30,17 @@ import {
 } from './core.js';
 import { generateOutfit, listConnectionProfiles, testConnectionProfile } from './generation.js';
 import { imageFileFromUrl, prepareImage } from './images.js';
+import { exportOutfitToWebsite, loadWebsiteData, websiteLooks } from './site_bridge.js';
+import { getWebsiteToken, setWebsiteToken } from './site_token.js';
+import {
+    DEFAULT_LOOK_TEMPLATE,
+    extBlockLookState,
+    listExtBlockTargets,
+    pickExtBlockTarget,
+    removeWebsiteLook,
+    sendWebsiteLook,
+    toggleWebsiteLook,
+} from './extblocks_bridge.js';
 
 const GALLERY_FIRST = 24;
 const GALLERY_MORE = 16;
@@ -38,6 +49,7 @@ const SETTINGS_TABS = [
     { id: 'subjects', label: 'Персонажи', icon: 'fa-users' },
     { id: 'tags', label: 'Теги', icon: 'fa-tags' },
     { id: 'connection', label: 'Подключение', icon: 'fa-plug' },
+    { id: 'website', label: 'Сайт', icon: 'fa-cloud-arrow-up' },
     { id: 'insertion', label: 'Вставка', icon: 'fa-code' },
     { id: 'scan', label: 'Сканирование', icon: 'fa-magnifying-glass' },
     { id: 'generation', label: 'Генерация', icon: 'fa-wand-magic-sparkles' },
@@ -58,6 +70,7 @@ let profilesLoaded = false;
 let profilesLoading = false;
 let profileTestController = null;
 let imageController = null;
+let siteController = null;
 
 const ui = {
     view: 'gallery',
@@ -82,6 +95,9 @@ const ui = {
     undo: null,
     status: '',
     connectionStatus: '',
+    websiteLooks: [],
+    websiteStatus: '',
+    websiteLoading: false,
 };
 
 function getSettingsContainer() {
@@ -326,7 +342,7 @@ function outfitCardHtml(outfit) {
             <span class="nw-outfit-copy"><strong>${escapeHtml(outfit.name)}</strong>${subject ? `<small><i class="fa-solid ${subjectIcon(subject.type)}"></i> ${escapeHtml(subject.name)}</small>` : '<small>Без привязки</small>'}</span>
         </button>
         <div class="nw-card-tags">${tags.map(tag => `<span class="nw-card-tag nw-tag-pill" style="${colorStyle(tag.color)}"><i class="fa-solid fa-tag" aria-hidden="true"></i><span>${escapeHtml(tag.name)}</span></span>`).join('')}</div>
-        <div class="nw-card-actions"><button class="menu_button fa-fw${outfit.favorite ? ' active' : ''}" data-action="toggle-favorite" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Избранное" title="Избранное"><i class="fa-solid fa-star"></i></button><button class="menu_button fa-fw" data-action="edit-outfit" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Редактировать" title="Редактировать"><i class="fa-solid fa-pen"></i></button></div>
+        <div class="nw-card-actions"><button class="menu_button fa-fw${outfit.favorite ? ' active' : ''}" data-action="toggle-favorite" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Избранное" title="Избранное"><i class="fa-solid fa-star"></i></button><button class="menu_button fa-fw" data-action="export-outfit-site" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Отправить на сайт" title="Отправить на сайт"><i class="fa-solid fa-cloud-arrow-up"></i></button><button class="menu_button fa-fw" data-action="edit-outfit" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Редактировать" title="Редактировать"><i class="fa-solid fa-pen"></i></button></div>
     </article>`;
 }
 
@@ -454,7 +470,7 @@ function createViewHtml() {
             <section class="nw-form-card" aria-labelledby="nw-details-heading"><div class="nw-form-card-head"><div><strong id="nw-details-heading">Детали наряда</strong><small>Название, привязка и текст для поста</small></div></div><label><span>Название</span><input id="nw-outfit-name" class="text_pole" maxlength="120" value="${escapeHtml(draft.name)}"></label><label><span>Для кого этот наряд</span><div class="nw-field-row"><select id="nw-outfit-subject" class="text_pole"><option value="">Выбрать персону или персонажа…</option>${subjects}</select><button class="menu_button menu_button_icon" data-action="quick-subject"><i class="fa-solid fa-user-plus"></i><span>Добавить</span></button></div></label>${inlineSubjectCreatorHtml()}<label><span>Описание одежды</span><textarea id="nw-outfit-description" class="text_pole" rows="5" maxlength="12000" placeholder="Текст, который будет вставлен в пост">${escapeHtml(draft.description)}</textarea></label></section>
             <section class="nw-form-card nw-tag-picker" aria-labelledby="nw-tags-heading"><div class="nw-form-card-head"><div><strong id="nw-tags-heading">Теги</strong><small>Ищи существующий или введи новое название</small></div><small>Enter — выбрать или создать</small></div><label class="nw-tag-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="nw-tag-search" class="text_pole" type="search" maxlength="120" autocomplete="off" placeholder="Найти тег по названию…" value="${escapeHtml(ui.tagSearch)}"></label><div id="nw-draft-tag-results" class="nw-filter-strip nw-draft-tags" aria-live="polite">${draftTagResultsHtml()}</div></section>
             <section class="nw-form-card" aria-labelledby="nw-images-heading"><div class="nw-form-card-head"><div><strong id="nw-images-heading">Обложка и шоукейс</strong><small>До трёх изображений; первое станет обложкой</small></div><span class="nw-counter">${draft.images.length}/3</span></div><div class="nw-image-list">${images || '<small class="nw-media-empty">Изображения пока не добавлены.</small>'}</div><div class="nw-image-source-actions"><label class="menu_button nw-file-button${draft.images.length >= 3 ? ' disabled' : ''}"><i class="fa-solid fa-folder-open"></i><span>С устройства</span><input id="nw-image-files" type="file" accept="image/*" multiple hidden ${draft.images.length >= 3 ? 'disabled' : ''}></label><button class="menu_button menu_button_icon" data-action="add-image-url" ${draft.images.length >= 3 ? 'disabled' : ''}><i class="fa-solid fa-link"></i><span>По ссылке</span></button><button class="menu_button menu_button_icon" data-action="paste-image" ${draft.images.length >= 3 ? 'disabled' : ''}><i class="fa-solid fa-clipboard"></i><span>Из буфера</span></button></div><div id="nw-image-status" class="nw-message" role="status" aria-live="polite"></div></section>
-            <div class="nw-form-actions nw-form-footer"><button class="menu_button menu_button_icon nw-main-action" data-action="save-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить наряд</span></button>${settings.outfits.some(outfit => outfit.id === draft.id) ? '<button class="menu_button menu_button_icon" data-action="delete-outfit"><i class="fa-solid fa-trash"></i><span>Удалить</span></button>' : ''}</div>
+            <div class="nw-form-actions nw-form-footer"><button class="menu_button menu_button_icon nw-main-action" data-action="save-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить наряд</span></button>${settings.outfits.some(outfit => outfit.id === draft.id) ? `<button class="menu_button menu_button_icon" data-action="export-outfit-site" data-outfit-id="${escapeHtml(draft.id)}"><i class="fa-solid fa-cloud-arrow-up"></i><span>На сайт</span></button><button class="menu_button menu_button_icon" data-action="delete-outfit"><i class="fa-solid fa-trash"></i><span>Удалить</span></button>` : ''}</div>
         </section>`;
 }
 
@@ -481,6 +497,39 @@ function connectionOptionsHtml() {
         ${missing}${connectionProfiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${selected === profile.id ? 'selected' : ''}>${escapeHtml(profile.name)}</option>`).join('')}`;
 }
 
+function selectedExtBlockTarget() {
+    return pickExtBlockTarget(getContext(), settings.website.extBlockRef, settings.website.extBlockName);
+}
+
+function extBlockOptionsHtml() {
+    const targets = listExtBlockTargets(getContext());
+    const selected = selectedExtBlockTarget();
+    if (!targets.length) return '<option value="">ExtBlocks не найден или в нём нет подходящих блоков</option>';
+    return targets.map(target => `<option value="${escapeHtml(target.ref)}" ${selected?.ref === target.ref ? 'selected' : ''}>${escapeHtml(target.label)}</option>`).join('');
+}
+
+function websiteLookCardHtml(look) {
+    const target = selectedExtBlockTarget();
+    const state = target ? extBlockLookState(target.block, look) : { present: false, disabled: false };
+    const status = state.present ? `<span class="nw-site-look-state"><i class="fa-solid ${state.disabled ? 'fa-eye-slash' : 'fa-circle-check'}"></i>${state.disabled ? 'выключена' : 'в блоке'}</span>` : '';
+    return `<article class="nw-site-look${state.disabled ? ' disabled' : ''}" data-look-id="${escapeHtml(look.id)}"><div class="nw-site-look-head"><strong>${escapeHtml(look.name)}</strong>${status}</div><div class="nw-site-look-desc">${look.desc ? escapeHtml(look.desc) : '<i>Описания пока нет</i>'}</div><div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="site-look-send" data-look-id="${escapeHtml(look.id)}" ${look.desc && target ? '' : 'disabled'}><i class="fa-solid fa-paper-plane"></i><span>${state.present ? 'Обновить в блоке' : 'В Context Builder'}</span></button>${state.present ? `<button class="menu_button fa-fw" data-action="site-look-toggle" data-look-id="${escapeHtml(look.id)}" title="${state.disabled ? 'Включить' : 'Выключить'}"><i class="fa-solid ${state.disabled ? 'fa-eye' : 'fa-eye-slash'}"></i></button><button class="menu_button fa-fw" data-action="site-look-remove" data-look-id="${escapeHtml(look.id)}" title="Убрать из блока"><i class="fa-solid fa-trash"></i></button>` : ''}</div></article>`;
+}
+
+function websiteSettingsPaneHtml() {
+    const website = settings.website;
+    const looks = ui.websiteLooks.map(websiteLookCardHtml).join('');
+    return `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Сайт-гардероб</strong><small>Загружает внешности с сайта и отправляет сохранённые наряды вместе с обложкой обратно на GitHub.</small></div>${ui.websiteLoading ? '<span>загрузка…</span>' : ''}</div>
+        <label><span>Адрес сайта</span><input id="nw-website-url" class="text_pole" type="url" inputmode="url" placeholder="https://логин.github.io/wardrobe/" value="${escapeHtml(website.siteUrl)}"><small>Для чтения внешностей достаточно этого адреса.</small></label>
+        <div class="nw-settings-grid"><label><span>Логин GitHub</span><input id="nw-website-user" class="text_pole" autocomplete="off" value="${escapeHtml(website.githubUser)}"></label><label><span>Репозиторий</span><input id="nw-website-repo" class="text_pole" autocomplete="off" placeholder="wardrobe" value="${escapeHtml(website.githubRepo)}"></label></div>
+        <label><span>Токен GitHub</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="off" placeholder="Нужен только для отправки нарядов" value="${escapeHtml(getWebsiteToken())}"><small>Хранится только в этом браузере и не попадает в резервную копию NESS Wardrobe.</small></label>
+        <label><span>Context Builder блока ExtBlocks</span><select id="nw-website-extblock" class="text_pole">${extBlockOptionsHtml()}</select></label>
+        <details class="nw-site-template"><summary>Шаблон записи внешности</summary><textarea id="nw-website-look-template" class="text_pole nw-code-field" rows="5" maxlength="20000">${escapeHtml(website.lookTemplate || DEFAULT_LOOK_TEMPLATE)}</textarea><small>{{name}} — имя, {{desc}} — описание внешности целиком.</small><button class="menu_button" data-action="reset-look-template">Вернуть стандартный текст</button></details>
+        <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить подключение</span></button><button class="menu_button menu_button_icon" data-action="load-website-looks"><i class="fa-solid fa-rotate"></i><span>Загрузить внешности</span></button></div>
+        <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.websiteStatus)}</div>
+        <section class="nw-site-looks"><div class="nw-settings-pane-head"><div><strong>Внешности с сайта</strong><small>Повторная отправка обновляет прежний пункт, а не создаёт дубль.</small></div><span class="nw-counter">${ui.websiteLooks.length}</span></div>${looks || emptyHtml('Внешности не загружены', 'Сохрани адрес сайта и нажми «Загрузить внешности».')}</section>
+    </section>`;
+}
+
 function settingsViewHtml() {
     const rule = settings.regex;
     const tab = SETTINGS_TABS.some(item => item.id === ui.settingsTab) ? ui.settingsTab : 'subjects';
@@ -489,6 +538,7 @@ function settingsViewHtml() {
         subjects: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Персоны и персонажи</strong><small>Персонаж ◆ — герой или NPC. Персона ● — образ пользователя.</small></div><span class="nw-counter">${settings.subjects.length}</span></div><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div>${inlineSubjectCreatorHtml()}<div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></section>`,
         tags: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Обычные теги</strong><small>Цветные метки для фильтрации. Цвет не попадает в описание одежды.</small></div><span class="nw-counter">${settings.tags.length}</span></div><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="new-tag"><i class="fa-solid fa-tag"></i><span>Создать тег</span></button></div><div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></section>`,
         connection: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Подключение к модели</strong><small>Профиль анализирует лорбук и последние два поста, затем создаёт наряд.</small></div><span>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</span></div><label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label><div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div></section>`,
+        website: websiteSettingsPaneHtml(),
         insertion: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Вставка в пост</strong><small>Проверяется указанное число последних постов, но меняется только самый свежий найденный блок гардероба.</small></div></div><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="5" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов проверить</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><label><span>Шаблон новой строки</span><textarea id="nw-regex-entry-template" class="text_pole nw-code-field" rows="2" maxlength="2000">${escapeHtml(rule.entryTemplate)}</textarea><small>Оставь переменные {{name}} и {{outfit}} — вместо них подставятся имя и описание.</small></label><label><span>Маркер конца гардероба</span><input id="nw-regex-closing-marker" class="text_pole nw-code-field" maxlength="500" value="${escapeHtml(rule.closingMarker)}"></label><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
         scan: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт сканирования</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-scan-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.scan)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-scan-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
         generation: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт генерации</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{scan}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-generation-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.outfit)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-generation-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
@@ -532,6 +582,9 @@ function showPanel() {
             generationController = null;
             profileTestController?.abort();
             profileTestController = null;
+            siteController?.abort();
+            siteController = null;
+            ui.websiteLoading = false;
             disposeGalleryObserver();
             clearTimeout(searchTimer);
         },
@@ -610,6 +663,21 @@ async function saveSettingsForm({ silent = false } = {}) {
                 changed = settings.connection.profileId !== profileId;
                 settings.connection.profileId = profileId;
             }
+        } else if (ui.settingsTab === 'website') {
+            const extBlockRef = document.getElementById('nw-website-extblock')?.value || '';
+            const extBlock = listExtBlockTargets(getContext()).find(target => target.ref === extBlockRef);
+            const next = {
+                siteUrl: document.getElementById('nw-website-url')?.value.trim() || '',
+                githubUser: document.getElementById('nw-website-user')?.value.trim() || '',
+                githubRepo: document.getElementById('nw-website-repo')?.value.trim() || '',
+                extBlockRef,
+                extBlockName: extBlock?.block?.name || settings.website.extBlockName || 'nai_imagen',
+                lookTemplate: document.getElementById('nw-website-look-template')?.value || '',
+            };
+            changed = JSON.stringify(settings.website) !== JSON.stringify(next);
+            settings.website = next;
+            const tokenField = document.getElementById('nw-website-token');
+            if (tokenField) setWebsiteToken(tokenField.value);
         } else if (ui.settingsTab === 'scan') {
             const field = document.getElementById('nw-scan-prompt');
             if (field) {
@@ -627,11 +695,116 @@ async function saveSettingsForm({ silent = false } = {}) {
         }
         if (changed) commitSettings();
         if (ui.settingsTab === 'connection') ui.connectionStatus = 'Настройки сохранены.';
+        if (ui.settingsTab === 'website') ui.websiteStatus = 'Подключение сохранено.';
         if (!silent && status) status.textContent = 'Настройки сохранены.';
         return true;
     } catch (error) {
         if (status) status.textContent = `Не сохранено: ${error.message || error}`;
         return false;
+    }
+}
+
+function websiteRequestConfig(signal = undefined) {
+    return { ...settings.website, token: getWebsiteToken(), signal };
+}
+
+async function loadWebsiteLooks() {
+    if (ui.websiteLoading) return;
+    if (ui.settingsTab === 'website' && !await saveSettingsForm({ silent: true })) return;
+    siteController?.abort();
+    const controller = new AbortController();
+    const ownRevision = operationRevision;
+    siteController = controller;
+    ui.websiteLoading = true;
+    ui.websiteStatus = 'Загружаю wardrobe.json…';
+    render();
+    try {
+        const data = await loadWebsiteData(websiteRequestConfig(controller.signal));
+        if (controller.signal.aborted || ownRevision !== operationRevision) return;
+        ui.websiteLooks = websiteLooks(data);
+        ui.websiteStatus = ui.websiteLooks.length ? `Загружено внешностей: ${ui.websiteLooks.length}.` : 'На сайте пока нет внешностей.';
+    } catch (error) {
+        if (!controller.signal.aborted && ownRevision === operationRevision) ui.websiteStatus = `Не удалось загрузить: ${error.message || error}`;
+    } finally {
+        if (siteController === controller) siteController = null;
+        if (ownRevision === operationRevision) {
+            ui.websiteLoading = false;
+            if (managerPopup && ui.view === 'settings' && ui.settingsTab === 'website') render();
+        }
+    }
+}
+
+function findWebsiteLook(id) {
+    return ui.websiteLooks.find(look => look.id === id);
+}
+
+async function sendLookFromWebsite(id) {
+    const look = findWebsiteLook(id);
+    const target = selectedExtBlockTarget();
+    if (!look || !target) return notify('Не выбрана внешность или блок ExtBlocks.', 'warning');
+    try {
+        const result = await sendWebsiteLook(getContext(), target, look, settings.website.lookTemplate || DEFAULT_LOOK_TEMPLATE);
+        settings.website.extBlockRef = target.ref;
+        settings.website.extBlockName = target.block.name;
+        commitSettings();
+        ui.websiteStatus = result === 'added' ? `«${look.name}» добавлена в Context Builder.` : `«${look.name}» обновлена в Context Builder.`;
+        render();
+    } catch (error) {
+        ui.websiteStatus = `Не удалось добавить внешность: ${error.message || error}`;
+        render();
+    }
+}
+
+async function toggleLookFromWebsite(id) {
+    const look = findWebsiteLook(id);
+    const target = selectedExtBlockTarget();
+    if (!look || !target) return;
+    await toggleWebsiteLook(getContext(), target, look);
+    render();
+}
+
+async function removeLookFromWebsite(id) {
+    const look = findWebsiteLook(id);
+    const target = selectedExtBlockTarget();
+    if (!look || !target) return;
+    await removeWebsiteLook(getContext(), target, look);
+    ui.websiteStatus = `«${look.name}» убрана из Context Builder.`;
+    render();
+}
+
+async function exportSavedOutfitToWebsite(outfitId) {
+    const outfit = findOutfit(outfitId);
+    const subject = findSubject(outfit?.subjectId);
+    if (!outfit || !subject) return notify('Сначала сохрани наряд и выбери, для кого он.', 'warning');
+    if (!outfit.images[0]) return notify('Добавь наряду обложку перед отправкой на сайт.', 'warning');
+    if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) {
+        notify('Сначала заполни GitHub в Настройки → Сайт.', 'warning');
+        return;
+    }
+    const suggestedShelf = outfit.tagIds.map(id => findTag(id)?.name).find(Boolean) || 'Образы';
+    const revision = operationRevision;
+    const popup = new Popup(`<div class="nw-site-export-dialog"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Отправить «${escapeHtml(outfit.name)}» на сайт</h3><small>Укажи полку. Если такого персонажа или полки ещё нет, они будут созданы автоматически. На сайт уйдут описание и первая картинка.</small></div>`, POPUP_TYPE.INPUT, suggestedShelf, { wide: false, okButton: 'Отправить', cancelButton: 'Отмена' });
+    const value = await popup.show();
+    if (typeof value !== 'string' || revision !== operationRevision) return;
+    const shelfName = normalizeName(value);
+    if (!shelfName) return notify('Введи название полки на сайте.', 'warning');
+    siteController?.abort();
+    const controller = new AbortController();
+    siteController = controller;
+    $('#nw-header-status').text('Отправляю на сайт…');
+    $('[data-action="export-outfit-site"]').prop('disabled', true);
+    try {
+        await exportOutfitToWebsite(websiteRequestConfig(controller.signal), { outfit, subject, shelfName });
+        if (controller.signal.aborted || revision !== operationRevision) return;
+        ui.status = `«${outfit.name}» отправлен на сайт. GitHub Pages может обновляться несколько минут.`;
+        notify(ui.status, 'success');
+        if (managerPopup) render();
+    } catch (error) {
+        if (!controller.signal.aborted) notify(`Не удалось отправить на сайт: ${error.message || error}`, 'error');
+    } finally {
+        if (siteController === controller) siteController = null;
+        $('#nw-header-status').text('');
+        $('[data-action="export-outfit-site"]').prop('disabled', false);
     }
 }
 
@@ -1250,6 +1423,9 @@ function bindEvents() {
         generationController = null;
         profileTestController?.abort();
         profileTestController = null;
+        siteController?.abort();
+        siteController = null;
+        ui.websiteLoading = false;
         ui.subjectCreator = null;
         ui.tagSearch = '';
         ui.view = nextView;
@@ -1295,6 +1471,9 @@ function bindEvents() {
         const nextTab = this.dataset.settingsTab;
         if (!SETTINGS_TABS.some(tab => tab.id === nextTab) || nextTab === ui.settingsTab) return;
         if (!await saveSettingsForm({ silent: true })) return;
+        siteController?.abort();
+        siteController = null;
+        ui.websiteLoading = false;
         ui.settingsTab = nextTab;
         render();
         requestAnimationFrame(() => document.querySelector(`[data-settings-tab="${nextTab}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center' }));
@@ -1337,6 +1516,7 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="remove-image"]', function () { captureDraft(); ui.draft.images = ui.draft.images.filter(image => image.id !== this.dataset.imageId); render(); });
     $(document).on(`click${NS}`, '[data-action="make-cover"]', function () { captureDraft(); const index = ui.draft.images.findIndex(image => image.id === this.dataset.imageId); if (index > 0) ui.draft.images.unshift(ui.draft.images.splice(index, 1)[0]); render(); });
     $(document).on(`click${NS}`, '[data-action="save-outfit"]', saveOutfit);
+    $(document).on(`click${NS}`, '[data-action="export-outfit-site"]', function () { void exportSavedOutfitToWebsite(this.dataset.outfitId); });
     $(document).on(`click${NS}`, '[data-action="delete-outfit"]', () => void deleteOutfit());
     $(document).on(`click${NS}`, '[data-action="generate-outfit"]', () => void generateFromForm());
     $(document).on(`click${NS}`, '[data-action="save-settings"]', () => void saveSettingsForm());
@@ -1345,6 +1525,12 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="test-profile"]', () => void testSelectedProfile());
     $(document).on(`click${NS}`, '[data-action="reset-scan-prompt"]', () => { const field = document.getElementById('nw-scan-prompt'); if (field) field.value = DEFAULT_SCAN_PROMPT; });
     $(document).on(`click${NS}`, '[data-action="reset-generation-prompt"]', () => { const field = document.getElementById('nw-generation-prompt'); if (field) field.value = DEFAULT_GENERATION_PROMPT; });
+    $(document).on(`click${NS}`, '[data-action="reset-look-template"]', () => { const field = document.getElementById('nw-website-look-template'); if (field) field.value = DEFAULT_LOOK_TEMPLATE; });
+    $(document).on(`click${NS}`, '[data-action="load-website-looks"]', () => void loadWebsiteLooks());
+    $(document).on(`change${NS}`, '#nw-website-extblock', function () { settings.website.extBlockRef = this.value; settings.website.extBlockName = listExtBlockTargets(getContext()).find(target => target.ref === this.value)?.block?.name || settings.website.extBlockName; commitSettings(); render(); });
+    $(document).on(`click${NS}`, '[data-action="site-look-send"]', function () { void sendLookFromWebsite(this.dataset.lookId); });
+    $(document).on(`click${NS}`, '[data-action="site-look-toggle"]', function () { void toggleLookFromWebsite(this.dataset.lookId); });
+    $(document).on(`click${NS}`, '[data-action="site-look-remove"]', function () { void removeLookFromWebsite(this.dataset.lookId); });
     $(document).on(`change${NS}`, '[data-subject-field]', function () { const row = this.closest('[data-subject-id]'); const subject = findSubject(row?.dataset.subjectId); if (!subject) return; const field = this.dataset.subjectField; if (field === 'name') { subject.name = normalizeName(this.value) || subject.name; this.value = subject.name; } if (field === 'type') subject.type = this.value === 'persona' ? 'persona' : 'character'; if (field === 'color') subject.color = normalizeColor(this.value, subject.color); commitSettings(); });
     $(document).on(`keydown${NS}`, '.nw-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); const alias = normalizeName(this.value); if (!subject || !alias || comparableName(alias) === comparableName(subject.name) || subject.aliases.some(item => comparableName(item) === comparableName(alias))) return; subject.aliases.push(alias); commitSettings(); render(); });
     $(document).on(`click${NS}`, '[data-action="remove-alias"]', function () { const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); if (!subject) return; subject.aliases = subject.aliases.filter(alias => alias !== this.dataset.alias); commitSettings(); render(); });
@@ -1362,6 +1548,9 @@ function onChatChanged() {
     generationController = null;
     profileTestController?.abort();
     profileTestController = null;
+    siteController?.abort();
+    siteController = null;
+    ui.websiteLoading = false;
     ui.view = 'gallery';
     ui.subjectFilter = '';
     ui.tagFilters.clear();
@@ -1389,7 +1578,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.4.1 ready');
+        console.log('[NESS Wardrobe] v1.5.0 ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');
