@@ -39,6 +39,7 @@ const library = {
 };
 const context = { extensionSettings: { variables: { global: { sp_ness_master_library_v1: JSON.stringify(library) } } } };
 const result = readNessLibrary(context);
+assert.strictEqual(readNessLibrary(context), result, 'unchanged serialized library uses the parsed cache');
 assert.equal(result.available, true);
 assert.equal(result.records.length, 2);
 assert.equal(result.records.find(record => record.libraryId === 'ada').id, 'ness_ada');

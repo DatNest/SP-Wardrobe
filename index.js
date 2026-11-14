@@ -36,6 +36,10 @@ import { readNessLibrary, splitWebsiteLooks } from './ness_library_bridge.js';
 
 const GALLERY_FIRST = 24;
 const GALLERY_MORE = 16;
+const LIBRARY_LOOKS_FIRST = 16;
+const LIBRARY_LOOKS_MORE = 16;
+const WEBSITE_LOOKS_FIRST = 12;
+const WEBSITE_LOOKS_MORE = 12;
 const NS = '.nessWardrobe';
 const SETTINGS_TABS = [
     { id: 'subjects', label: 'Персонажи', icon: 'fa-users' },
@@ -63,6 +67,8 @@ let profilesLoading = false;
 let profileTestController = null;
 let imageController = null;
 let siteController = null;
+let settingsRevision = 0;
+let galleryResultCache = { key: '', outfits: [], subjectById: new Map(), tagById: new Map() };
 
 const ui = {
     view: 'gallery',
@@ -91,6 +97,9 @@ const ui = {
     websiteLoaded: false,
     websiteStatus: '',
     websiteLoading: false,
+    libraryLooksOffset: LIBRARY_LOOKS_FIRST,
+    websiteOnlyOpen: false,
+    websiteLooksOffset: WEBSITE_LOOKS_FIRST,
 };
 
 function getSettingsContainer() {
@@ -103,13 +112,14 @@ function loadSettings() {
     if (!container) throw new Error('SillyTavern не предоставил хранилище настроек.');
     settings = normalizeSettings(container[EXTENSION_KEY] || DEFAULT_SETTINGS);
     container[EXTENSION_KEY] = settings;
-    commitSettings();
+    settingsRevision++;
 }
 
 function commitSettings() {
     const container = getSettingsContainer();
     if (!container || !settings) return;
     container[EXTENSION_KEY] = settings;
+    settingsRevision++;
     const context = getContext();
     if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
     else console.warn('[NESS Wardrobe] saveSettingsDebounced is unavailable');
@@ -313,21 +323,28 @@ function galleryViewHtml() {
 
 function filteredOutfits() {
     const query = comparableName(ui.search);
-    return settings.outfits.filter(outfit => {
+    const selectedTags = [...ui.tagFilters].sort();
+    const key = [settingsRevision, query, ui.subjectFilter, Number(ui.favoriteOnly), selectedTags.join('\u0001')].join('\u0000');
+    if (galleryResultCache.key === key) return galleryResultCache;
+    const subjectById = new Map(settings.subjects.map(subject => [subject.id, subject]));
+    const tagById = new Map(settings.tags.map(tag => [tag.id, tag]));
+    const outfits = settings.outfits.filter(outfit => {
         if (ui.subjectFilter && outfit.subjectId !== ui.subjectFilter) return false;
         if (ui.favoriteOnly && !outfit.favorite) return false;
-        if (ui.tagFilters.size && ![...ui.tagFilters].every(id => outfit.tagIds.includes(id))) return false;
+        if (selectedTags.length && !selectedTags.every(id => outfit.tagIds.includes(id))) return false;
         if (!query) return true;
-        const subject = findSubject(outfit.subjectId);
-        const haystack = comparableName([outfit.name, outfit.description, subject?.name, ...outfit.tagIds.map(id => findTag(id)?.name || '')].join(' '));
+        const subject = subjectById.get(outfit.subjectId);
+        const haystack = comparableName([outfit.name, outfit.description, subject?.name, ...outfit.tagIds.map(id => tagById.get(id)?.name || '')].join(' '));
         return haystack.includes(query);
     }).sort((a, b) => Number(b.favorite) - Number(a.favorite) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    galleryResultCache = { key, outfits, subjectById, tagById };
+    return galleryResultCache;
 }
 
-function outfitCardHtml(outfit) {
-    const subject = findSubject(outfit.subjectId);
+function outfitCardHtml(outfit, subjectById, tagById) {
+    const subject = subjectById.get(outfit.subjectId);
     const image = outfit.images[0]?.dataUrl;
-    const tags = outfit.tagIds.slice(0, 3).map(id => findTag(id)).filter(Boolean);
+    const tags = outfit.tagIds.slice(0, 3).map(id => tagById.get(id)).filter(Boolean);
     const imageHtml = image ? `<img src="${image}" alt="" loading="lazy" decoding="async">` : '<span class="nw-placeholder" aria-hidden="true">👗</span>';
     return `<article class="nw-outfit-card" data-outfit-id="${escapeHtml(outfit.id)}">
         <button class="nw-outfit-apply" data-action="apply-outfit" data-outfit-id="${escapeHtml(outfit.id)}" ${outfit.description ? '' : 'disabled'} aria-label="Применить наряд ${escapeHtml(outfit.name)}">
@@ -347,7 +364,7 @@ function disposeGalleryObserver() {
 function renderGalleryGrid(reset = true) {
     const grid = document.getElementById('nw-gallery-grid');
     if (!grid) return;
-    const outfits = filteredOutfits();
+    const { outfits, subjectById, tagById } = filteredOutfits();
     disposeGalleryObserver();
     if (reset) {
         ui.galleryOffset = 0;
@@ -359,7 +376,7 @@ function renderGalleryGrid(reset = true) {
     }
     const amount = ui.galleryOffset ? GALLERY_MORE : GALLERY_FIRST;
     const end = Math.min(outfits.length, ui.galleryOffset + amount);
-    grid.insertAdjacentHTML('beforeend', outfits.slice(ui.galleryOffset, end).map(outfitCardHtml).join(''));
+    grid.insertAdjacentHTML('beforeend', outfits.slice(ui.galleryOffset, end).map(outfit => outfitCardHtml(outfit, subjectById, tagById)).join(''));
     ui.galleryOffset = end;
     if (end >= outfits.length) return;
     const sentinel = document.createElement('div');
@@ -495,9 +512,16 @@ function currentNessLibrary() {
     catch (error) { return { available: false, records: [], error: String(error.message || error) }; }
 }
 
-function libraryLookIsOnWebsite(look) {
+function websiteAppearanceIndex() {
+    return {
+        ids: new Set(ui.websiteLooks.map(item => item.id)),
+        names: new Set(ui.websiteLooks.map(item => comparableName(item.name))),
+    };
+}
+
+function libraryLookIsOnWebsite(look, index) {
     const names = new Set([look.name, ...(look.aliases || [])].map(comparableName));
-    return ui.websiteLooks.some(item => item.id === look.id || names.has(comparableName(item.name)));
+    return index.ids.has(look.id) || [...names].some(name => index.names.has(name));
 }
 
 function websiteLookCardHtml(look, { library = false, onWebsite = false } = {}) {
@@ -508,9 +532,14 @@ function websiteLookCardHtml(look, { library = false, onWebsite = false } = {}) 
 function websiteSettingsPaneHtml() {
     const website = settings.website;
     const library = currentNessLibrary();
-    const libraryLooks = library.records.map(look => websiteLookCardHtml(look, { library: true, onWebsite: libraryLookIsOnWebsite(look) })).join('');
+    const websiteIndex = websiteAppearanceIndex();
+    const shownLibrary = library.records.slice(0, ui.libraryLooksOffset);
+    const libraryLooks = shownLibrary.map(look => websiteLookCardHtml(look, { library: true, onWebsite: libraryLookIsOnWebsite(look, websiteIndex) })).join('');
     const websiteOnly = splitWebsiteLooks(library.records, ui.websiteLooks);
-    const websiteOnlyLooks = websiteOnly.map(look => websiteLookCardHtml(look)).join('');
+    const shownWebsiteOnly = ui.websiteOnlyOpen ? websiteOnly.slice(0, ui.websiteLooksOffset) : [];
+    const websiteOnlyLooks = shownWebsiteOnly.map(look => websiteLookCardHtml(look)).join('');
+    const libraryMore = library.records.length > shownLibrary.length ? `<button class="menu_button nw-load-more" data-action="load-more-library-looks">Показать ещё ${Math.min(LIBRARY_LOOKS_MORE, library.records.length - shownLibrary.length)}</button>` : '';
+    const websiteMore = websiteOnly.length > shownWebsiteOnly.length ? `<button class="menu_button nw-load-more" data-action="load-more-website-looks">Показать ещё ${Math.min(WEBSITE_LOOKS_MORE, websiteOnly.length - shownWebsiteOnly.length)}</button>` : '';
     const libraryEmpty = library.error
         ? emptyHtml('Библиотека не прочитана', library.error)
         : emptyHtml('В NESS Library пока нет внешностей', library.available ? 'Заполни постоянную внешность в профиле «📚 Ness Library» и сохрани библиотеку.' : 'Сначала открой профиль «📚 Ness Library» и сохрани библиотеку.');
@@ -523,8 +552,8 @@ function websiteSettingsPaneHtml() {
         <label><span>Токен GitHub</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="off" placeholder="Нужен только для отправки нарядов" value="${escapeHtml(getWebsiteToken())}"><small>Хранится только в этом браузере и не попадает в резервную копию NESS Wardrobe.</small></label>
         <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить подключение</span></button><button class="menu_button menu_button_icon" data-action="load-website-looks"><i class="fa-solid fa-rotate"></i><span>Обновить данные сайта</span></button></div>
         <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.websiteStatus)}</div>
-        <section class="nw-site-looks nw-library-primary"><div class="nw-settings-pane-head"><div><strong>Из NESS Library</strong><small>Эти записи главные. Теги собраны через запятую; области тела идут отдельными абзацами с английскими заголовками.</small></div><span class="nw-counter">${library.records.length}</span></div>${libraryLooks || libraryEmpty}</section>
-        <details class="nw-site-only"><summary>Внешности только на сайте <span class="nw-counter">${websiteOnly.length}</span></summary><div class="nw-site-looks">${websiteOnlyLooks || websiteEmpty}</div></details>
+        <section class="nw-site-looks nw-library-primary"><div class="nw-settings-pane-head"><div><strong>Из NESS Library</strong><small>Показаны порциями, чтобы длинные внешности не тормозили окно.</small></div><span class="nw-counter">${shownLibrary.length}/${library.records.length}</span></div>${libraryLooks || libraryEmpty}${libraryMore}</section>
+        <section class="nw-site-only"><button class="menu_button nw-site-only-toggle" data-action="toggle-website-only" aria-expanded="${ui.websiteOnlyOpen}"><span>Внешности только на сайте</span><span class="nw-counter">${websiteOnly.length}</span><i class="fa-solid fa-chevron-${ui.websiteOnlyOpen ? 'up' : 'down'}"></i></button>${ui.websiteOnlyOpen ? `<div class="nw-site-looks">${websiteOnlyLooks || websiteEmpty}${websiteMore}</div>` : ''}</section>
     </section>`;
 }
 
@@ -533,16 +562,16 @@ function settingsViewHtml() {
     const tab = SETTINGS_TABS.some(item => item.id === ui.settingsTab) ? ui.settingsTab : 'subjects';
     const tabs = SETTINGS_TABS.map(item => `<button class="menu_button nw-settings-tab${tab === item.id ? ' active' : ''}" role="tab" aria-selected="${tab === item.id}" data-settings-tab="${item.id}"><i class="fa-solid ${item.icon}" aria-hidden="true"></i><span>${item.label}</span></button>`).join('');
     const panes = {
-        subjects: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Персоны и персонажи</strong><small>Персонаж ◆ — герой или NPC. Персона ● — образ пользователя.</small></div><span class="nw-counter">${settings.subjects.length}</span></div><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div>${inlineSubjectCreatorHtml()}<div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></section>`,
-        tags: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Обычные теги</strong><small>Цветные метки для фильтрации. Цвет не попадает в описание одежды.</small></div><span class="nw-counter">${settings.tags.length}</span></div><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="new-tag"><i class="fa-solid fa-tag"></i><span>Создать тег</span></button></div><div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></section>`,
-        connection: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Подключение к модели</strong><small>Профиль анализирует лорбук и последние два поста, затем создаёт наряд.</small></div><span>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</span></div><label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label><div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div></section>`,
-        website: websiteSettingsPaneHtml(),
-        insertion: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Вставка в пост</strong><small>Проверяется указанное число последних постов, но меняется только самый свежий найденный блок гардероба.</small></div></div><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="5" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов проверить</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><label><span>Шаблон новой строки</span><textarea id="nw-regex-entry-template" class="text_pole nw-code-field" rows="2" maxlength="2000">${escapeHtml(rule.entryTemplate)}</textarea><small>Оставь переменные {{name}} и {{outfit}} — вместо них подставятся имя и описание.</small></label><label><span>Маркер конца гардероба</span><input id="nw-regex-closing-marker" class="text_pole nw-code-field" maxlength="500" value="${escapeHtml(rule.closingMarker)}"></label><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
-        scan: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт сканирования</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-scan-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.scan)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-scan-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
-        generation: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт генерации</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{scan}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-generation-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.outfit)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-generation-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
-        transfer: `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Перенос и резервная копия</strong><small>Файл содержит наряды, изображения, теги, персонажей, правило и промпты.</small></div></div><p class="nw-help">Закрепления отдельных чатов не экспортируются, потому что хранятся внутри самих чатов.</p><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="export"><i class="fa-solid fa-file-export"></i><span>Экспортировать</span></button><label class="menu_button menu_button_icon nw-file-button"><i class="fa-solid fa-file-import"></i><span>Импортировать</span><input id="nw-import-file" type="file" accept="application/json,.json" hidden></label></div></section>`,
+        subjects: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Персоны и персонажи</strong><small>Персонаж ◆ — герой или NPC. Персона ● — образ пользователя.</small></div><span class="nw-counter">${settings.subjects.length}</span></div><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div>${inlineSubjectCreatorHtml()}<div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></section>`,
+        tags: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Обычные теги</strong><small>Цветные метки для фильтрации. Цвет не попадает в описание одежды.</small></div><span class="nw-counter">${settings.tags.length}</span></div><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="new-tag"><i class="fa-solid fa-tag"></i><span>Создать тег</span></button></div><div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></section>`,
+        connection: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Подключение к модели</strong><small>Профиль анализирует лорбук и последние два поста, затем создаёт наряд.</small></div><span>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</span></div><label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label><div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div></section>`,
+        website: websiteSettingsPaneHtml,
+        insertion: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Вставка в пост</strong><small>Проверяется указанное число последних постов, но меняется только самый свежий найденный блок гардероба.</small></div></div><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="5" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов проверить</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><label><span>Шаблон новой строки</span><textarea id="nw-regex-entry-template" class="text_pole nw-code-field" rows="2" maxlength="2000">${escapeHtml(rule.entryTemplate)}</textarea><small>Оставь переменные {{name}} и {{outfit}} — вместо них подставятся имя и описание.</small></label><label><span>Маркер конца гардероба</span><input id="nw-regex-closing-marker" class="text_pole nw-code-field" maxlength="500" value="${escapeHtml(rule.closingMarker)}"></label><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
+        scan: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт сканирования</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-scan-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.scan)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-scan-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
+        generation: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт генерации</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{scan}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-generation-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.outfit)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-generation-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
+        transfer: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Перенос и резервная копия</strong><small>Файл содержит наряды, изображения, теги, персонажей, правило и промпты.</small></div></div><p class="nw-help">Закрепления отдельных чатов не экспортируются, потому что хранятся внутри самих чатов.</p><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="export"><i class="fa-solid fa-file-export"></i><span>Экспортировать</span></button><label class="menu_button menu_button_icon nw-file-button"><i class="fa-solid fa-file-import"></i><span>Импортировать</span><input id="nw-import-file" type="file" accept="application/json,.json" hidden></label></div></section>`,
     };
-    return `<div class="nw-settings-shell"><nav class="nw-settings-tabs" role="tablist" aria-label="Разделы настроек">${tabs}</nav><div class="nw-settings-content">${panes[tab]}</div></div>`;
+    return `<div class="nw-settings-shell"><nav class="nw-settings-tabs" role="tablist" aria-label="Разделы настроек">${tabs}</nav><div class="nw-settings-content">${panes[tab]()}</div></div>`;
 }
 
 function render() {
@@ -1101,7 +1130,6 @@ function saveOutfit() {
     const index = settings.outfits.findIndex(outfit => outfit.id === normalized.id);
     if (index >= 0) settings.outfits[index] = normalized;
     else settings.outfits.push(normalized);
-    settings = normalizeSettings(settings);
     commitSettings();
     ui.draft = clone(normalized);
     notify(`Наряд «${normalized.name}» сохранён.`, 'success');
@@ -1515,6 +1543,9 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="reset-scan-prompt"]', () => { const field = document.getElementById('nw-scan-prompt'); if (field) field.value = DEFAULT_SCAN_PROMPT; });
     $(document).on(`click${NS}`, '[data-action="reset-generation-prompt"]', () => { const field = document.getElementById('nw-generation-prompt'); if (field) field.value = DEFAULT_GENERATION_PROMPT; });
     $(document).on(`click${NS}`, '[data-action="load-website-looks"]', () => void loadWebsiteLooks());
+    $(document).on(`click${NS}`, '[data-action="load-more-library-looks"]', () => { ui.libraryLooksOffset += LIBRARY_LOOKS_MORE; render(); });
+    $(document).on(`click${NS}`, '[data-action="toggle-website-only"]', () => { ui.websiteOnlyOpen = !ui.websiteOnlyOpen; render(); });
+    $(document).on(`click${NS}`, '[data-action="load-more-website-looks"]', () => { ui.websiteLooksOffset += WEBSITE_LOOKS_MORE; render(); });
     $(document).on(`click${NS}`, '[data-action="export-library-look-site"]', function () { void exportLibraryAppearanceToWebsite(this.dataset.lookId); });
     $(document).on(`change${NS}`, '[data-subject-field]', function () { const row = this.closest('[data-subject-id]'); const subject = findSubject(row?.dataset.subjectId); if (!subject) return; const field = this.dataset.subjectField; if (field === 'name') { subject.name = normalizeName(this.value) || subject.name; this.value = subject.name; } if (field === 'type') subject.type = this.value === 'persona' ? 'persona' : 'character'; if (field === 'color') subject.color = normalizeColor(this.value, subject.color); commitSettings(); });
     $(document).on(`keydown${NS}`, '.nw-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); const alias = normalizeName(this.value); if (!subject || !alias || comparableName(alias) === comparableName(subject.name) || subject.aliases.some(item => comparableName(item) === comparableName(alias))) return; subject.aliases.push(alias); commitSettings(); render(); });
@@ -1563,7 +1594,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.6.1 ready');
+        console.log('[NESS Wardrobe] v1.6.2 ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');

@@ -10,6 +10,9 @@ const BODY_SECTIONS = Object.freeze([
     ['nudeLower', 'NUDE LOWER'],
 ]);
 
+let cachedLibraryRaw = null;
+let cachedLibraryResult = null;
+
 function cleanText(value, limit = 12_000) {
     return String(value ?? '').replace(/\u0000/g, '').slice(0, limit).trim();
 }
@@ -41,7 +44,9 @@ function parseLibrary(raw) {
 
 export function readNessLibrary(context) {
     const globalVariables = context?.extensionSettings?.variables?.global || context?.extension_settings?.variables?.global;
-    const data = parseLibrary(globalVariables?.[NESS_LIBRARY_KEY]);
+    const raw = globalVariables?.[NESS_LIBRARY_KEY];
+    if (typeof raw === 'string' && raw === cachedLibraryRaw && cachedLibraryResult) return cachedLibraryResult;
+    const data = parseLibrary(raw);
     if (!data) return { available: false, records: [] };
     if (data.version !== 1 || !data.personas || !data.characters || Array.isArray(data.personas) || Array.isArray(data.characters)) {
         throw new Error('NESS Library имеет неподдерживаемый формат. Нужна библиотека версии 1.');
@@ -64,7 +69,12 @@ export function readNessLibrary(context) {
         }
     }
     records.sort((left, right) => left.name.localeCompare(right.name));
-    return { available: true, records, savedAt: data.savedAt || '', revision: Number(data.catalogRevision) || 0 };
+    const result = { available: true, records, savedAt: data.savedAt || '', revision: Number(data.catalogRevision) || 0 };
+    if (typeof raw === 'string') {
+        cachedLibraryRaw = raw;
+        cachedLibraryResult = result;
+    }
+    return result;
 }
 
 export function splitWebsiteLooks(libraryRecords, websiteRecords) {

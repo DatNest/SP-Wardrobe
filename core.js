@@ -154,8 +154,7 @@ export function normalizeSubject(value) {
 function normalizeImage(value) {
     const source = value && typeof value === 'object' ? value : {};
     const dataUrl = String(source.dataUrl || '');
-    if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z\d+/=]+$/i.test(dataUrl)) return null;
-    if (dataUrl.length > 2_500_000) return null;
+    if (dataUrl.length > 2_500_000 || !/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(dataUrl.slice(0, 48))) return null;
     return {
         id: typeof source.id === 'string' && source.id ? source.id : uid('image'),
         name: plainText(source.name || 'image', 120),

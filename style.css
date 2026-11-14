@@ -1339,22 +1339,26 @@
     padding: var(--nw-space-3);
 }
 
-.nw-site-only > summary {
+.nw-site-only-toggle.menu_button {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--nw-space-2);
-    cursor: pointer;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
     font-weight: 700;
 }
 
-.nw-site-only[open] > summary {
-    margin-bottom: var(--nw-space-3);
+.nw-site-only-toggle .nw-counter {
+    margin-left: auto;
 }
 
 .nw-site-only .nw-site-looks {
-    margin-top: 0;
-    padding-top: 0;
+    margin-top: var(--nw-space-3);
+    padding-top: var(--nw-space-3);
     border-top: 0;
 }
 
