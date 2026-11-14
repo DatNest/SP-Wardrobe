@@ -72,7 +72,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     outfits: [],
     regex: WARDROBE_RULE_DEFAULTS,
     connection: { profileId: 'auto' },
-    website: { siteUrl: '', githubUser: '', githubRepo: '', extBlockRef: '', extBlockName: 'nai_imagen', lookTemplate: '' },
+    website: { siteUrl: '', githubUser: '', githubRepo: '' },
     prompts: { scan: DEFAULT_SCAN_PROMPT, outfit: DEFAULT_GENERATION_PROMPT },
 });
 
@@ -250,9 +250,6 @@ export function normalizeSettings(value) {
             siteUrl: plainText(source.website?.siteUrl, 1000).trim(),
             githubUser: plainText(source.website?.githubUser, 200).trim(),
             githubRepo: plainText(source.website?.githubRepo, 200).trim(),
-            extBlockRef: plainText(source.website?.extBlockRef, 300).trim(),
-            extBlockName: plainText(source.website?.extBlockName || 'nai_imagen', 200).trim() || 'nai_imagen',
-            lookTemplate: plainText(source.website?.lookTemplate, 20_000),
         },
         prompts: {
             scan: plainText(source.prompts?.scan || DEFAULT_SCAN_PROMPT, 20_000),

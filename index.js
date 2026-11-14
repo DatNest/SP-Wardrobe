@@ -33,15 +33,6 @@ import { imageFileFromUrl, prepareImage } from './images.js';
 import { exportLibraryLookToWebsite, exportOutfitToWebsite, loadWebsiteData, websiteLooks } from './site_bridge.js';
 import { getWebsiteToken, setWebsiteToken } from './site_token.js';
 import { readNessLibrary, splitWebsiteLooks } from './ness_library_bridge.js';
-import {
-    DEFAULT_LOOK_TEMPLATE,
-    extBlockLookState,
-    listExtBlockTargets,
-    pickExtBlockTarget,
-    removeWebsiteLook,
-    sendWebsiteLook,
-    toggleWebsiteLook,
-} from './extblocks_bridge.js';
 
 const GALLERY_FIRST = 24;
 const GALLERY_MORE = 16;
@@ -499,17 +490,6 @@ function connectionOptionsHtml() {
         ${missing}${connectionProfiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${selected === profile.id ? 'selected' : ''}>${escapeHtml(profile.name)}</option>`).join('')}`;
 }
 
-function selectedExtBlockTarget() {
-    return pickExtBlockTarget(getContext(), settings.website.extBlockRef, settings.website.extBlockName);
-}
-
-function extBlockOptionsHtml() {
-    const targets = listExtBlockTargets(getContext());
-    const selected = selectedExtBlockTarget();
-    if (!targets.length) return '<option value="">ExtBlocks не найден или в нём нет подходящих блоков</option>';
-    return targets.map(target => `<option value="${escapeHtml(target.ref)}" ${selected?.ref === target.ref ? 'selected' : ''}>${escapeHtml(target.label)}</option>`).join('');
-}
-
 function currentNessLibrary() {
     try { return { ...readNessLibrary(getContext()), error: '' }; }
     catch (error) { return { available: false, records: [], error: String(error.message || error) }; }
@@ -520,16 +500,9 @@ function libraryLookIsOnWebsite(look) {
     return ui.websiteLooks.some(item => item.id === look.id || names.has(comparableName(item.name)));
 }
 
-function availableAppearance(id) {
-    return currentNessLibrary().records.find(look => look.id === id) || ui.websiteLooks.find(look => look.id === id);
-}
-
 function websiteLookCardHtml(look, { library = false, onWebsite = false } = {}) {
-    const target = selectedExtBlockTarget();
-    const state = target ? extBlockLookState(target.block, look) : { present: false, disabled: false };
-    const contextState = state.present ? `<span class="nw-site-look-state"><i class="fa-solid ${state.disabled ? 'fa-eye-slash' : 'fa-circle-check'}"></i>${state.disabled ? 'выключена' : 'в блоке'}</span>` : '';
     const siteState = library && ui.websiteLoaded ? `<span class="nw-site-look-state"><i class="fa-solid ${onWebsite ? 'fa-cloud' : 'fa-cloud-arrow-up'}"></i>${onWebsite ? 'на сайте' : 'ещё не на сайте'}</span>` : '';
-    return `<article class="nw-site-look${state.disabled ? ' disabled' : ''}" data-look-id="${escapeHtml(look.id)}"><div class="nw-site-look-head"><div><strong>${escapeHtml(look.name)}</strong>${library ? `<small>${look.type === 'persona' ? 'Персона' : 'Персонаж'} · NESS Library</small>` : '<small>Только на сайте</small>'}</div><div class="nw-site-look-states">${siteState}${contextState}</div></div><div class="nw-site-look-desc">${look.desc ? escapeHtml(look.desc) : '<i>Описания пока нет</i>'}</div><div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="site-look-send" data-look-id="${escapeHtml(look.id)}" ${look.desc && target ? '' : 'disabled'}><i class="fa-solid fa-paper-plane"></i><span>${state.present ? 'Обновить в блоке' : 'В Context Builder'}</span></button>${library ? `<button class="menu_button menu_button_icon" data-action="export-library-look-site" data-look-id="${escapeHtml(look.id)}"><i class="fa-solid fa-cloud-arrow-up"></i><span>${onWebsite ? 'Обновить сайт' : 'На сайт'}</span></button>` : ''}${state.present ? `<button class="menu_button fa-fw" data-action="site-look-toggle" data-look-id="${escapeHtml(look.id)}" title="${state.disabled ? 'Включить' : 'Выключить'}"><i class="fa-solid ${state.disabled ? 'fa-eye' : 'fa-eye-slash'}"></i></button><button class="menu_button fa-fw" data-action="site-look-remove" data-look-id="${escapeHtml(look.id)}" title="Убрать из блока"><i class="fa-solid fa-trash"></i></button>` : ''}</div></article>`;
+    return `<article class="nw-site-look" data-look-id="${escapeHtml(look.id)}"><div class="nw-site-look-head"><div><strong>${escapeHtml(look.name)}</strong>${library ? `<small>${look.type === 'persona' ? 'Персона' : 'Персонаж'} · NESS Library</small>` : '<small>Только на сайте</small>'}</div><div class="nw-site-look-states">${siteState}</div></div><div class="nw-site-look-desc">${look.desc ? escapeHtml(look.desc) : '<i>Описания пока нет</i>'}</div>${library ? `<div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="export-library-look-site" data-look-id="${escapeHtml(look.id)}"><i class="fa-solid fa-cloud-arrow-up"></i><span>${onWebsite ? 'Обновить сайт' : 'На сайт'}</span></button></div>` : ''}</article>`;
 }
 
 function websiteSettingsPaneHtml() {
@@ -548,8 +521,6 @@ function websiteSettingsPaneHtml() {
         <label><span>Адрес сайта</span><input id="nw-website-url" class="text_pole" type="url" inputmode="url" placeholder="https://логин.github.io/wardrobe/" value="${escapeHtml(website.siteUrl)}"><small>Для чтения внешностей достаточно этого адреса.</small></label>
         <div class="nw-settings-grid"><label><span>Логин GitHub</span><input id="nw-website-user" class="text_pole" autocomplete="off" value="${escapeHtml(website.githubUser)}"></label><label><span>Репозиторий</span><input id="nw-website-repo" class="text_pole" autocomplete="off" placeholder="wardrobe" value="${escapeHtml(website.githubRepo)}"></label></div>
         <label><span>Токен GitHub</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="off" placeholder="Нужен только для отправки нарядов" value="${escapeHtml(getWebsiteToken())}"><small>Хранится только в этом браузере и не попадает в резервную копию NESS Wardrobe.</small></label>
-        <label><span>Context Builder блока ExtBlocks</span><select id="nw-website-extblock" class="text_pole">${extBlockOptionsHtml()}</select></label>
-        <details class="nw-site-template"><summary>Шаблон записи внешности</summary><textarea id="nw-website-look-template" class="text_pole nw-code-field" rows="5" maxlength="20000">${escapeHtml(website.lookTemplate || DEFAULT_LOOK_TEMPLATE)}</textarea><small>{{name}} — имя, {{desc}} — описание внешности целиком.</small><button class="menu_button" data-action="reset-look-template">Вернуть стандартный текст</button></details>
         <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить подключение</span></button><button class="menu_button menu_button_icon" data-action="load-website-looks"><i class="fa-solid fa-rotate"></i><span>Обновить данные сайта</span></button></div>
         <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.websiteStatus)}</div>
         <section class="nw-site-looks nw-library-primary"><div class="nw-settings-pane-head"><div><strong>Из NESS Library</strong><small>Эти записи главные. Теги собраны через запятую; области тела идут отдельными абзацами с английскими заголовками.</small></div><span class="nw-counter">${library.records.length}</span></div>${libraryLooks || libraryEmpty}</section>
@@ -691,15 +662,10 @@ async function saveSettingsForm({ silent = false } = {}) {
                 settings.connection.profileId = profileId;
             }
         } else if (ui.settingsTab === 'website') {
-            const extBlockRef = document.getElementById('nw-website-extblock')?.value || '';
-            const extBlock = listExtBlockTargets(getContext()).find(target => target.ref === extBlockRef);
             const next = {
                 siteUrl: document.getElementById('nw-website-url')?.value.trim() || '',
                 githubUser: document.getElementById('nw-website-user')?.value.trim() || '',
                 githubRepo: document.getElementById('nw-website-repo')?.value.trim() || '',
-                extBlockRef,
-                extBlockName: extBlock?.block?.name || settings.website.extBlockName || 'nai_imagen',
-                lookTemplate: document.getElementById('nw-website-look-template')?.value || '',
             };
             changed = JSON.stringify(settings.website) !== JSON.stringify(next);
             settings.website = next;
@@ -760,40 +726,6 @@ async function loadWebsiteLooks() {
             if (managerPopup && ui.view === 'settings' && ui.settingsTab === 'website') render();
         }
     }
-}
-
-async function sendLookFromWebsite(id) {
-    const look = availableAppearance(id);
-    const target = selectedExtBlockTarget();
-    if (!look || !target) return notify('Не выбрана внешность или блок ExtBlocks.', 'warning');
-    try {
-        const result = await sendWebsiteLook(getContext(), target, look, settings.website.lookTemplate || DEFAULT_LOOK_TEMPLATE);
-        settings.website.extBlockRef = target.ref;
-        settings.website.extBlockName = target.block.name;
-        commitSettings();
-        ui.websiteStatus = result === 'added' ? `«${look.name}» добавлена в Context Builder.` : `«${look.name}» обновлена в Context Builder.`;
-        render();
-    } catch (error) {
-        ui.websiteStatus = `Не удалось добавить внешность: ${error.message || error}`;
-        render();
-    }
-}
-
-async function toggleLookFromWebsite(id) {
-    const look = availableAppearance(id);
-    const target = selectedExtBlockTarget();
-    if (!look || !target) return;
-    await toggleWebsiteLook(getContext(), target, look);
-    render();
-}
-
-async function removeLookFromWebsite(id) {
-    const look = availableAppearance(id);
-    const target = selectedExtBlockTarget();
-    if (!look || !target) return;
-    await removeWebsiteLook(getContext(), target, look);
-    ui.websiteStatus = `«${look.name}» убрана из Context Builder.`;
-    render();
 }
 
 async function exportLibraryAppearanceToWebsite(id) {
@@ -1582,13 +1514,8 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="test-profile"]', () => void testSelectedProfile());
     $(document).on(`click${NS}`, '[data-action="reset-scan-prompt"]', () => { const field = document.getElementById('nw-scan-prompt'); if (field) field.value = DEFAULT_SCAN_PROMPT; });
     $(document).on(`click${NS}`, '[data-action="reset-generation-prompt"]', () => { const field = document.getElementById('nw-generation-prompt'); if (field) field.value = DEFAULT_GENERATION_PROMPT; });
-    $(document).on(`click${NS}`, '[data-action="reset-look-template"]', () => { const field = document.getElementById('nw-website-look-template'); if (field) field.value = DEFAULT_LOOK_TEMPLATE; });
     $(document).on(`click${NS}`, '[data-action="load-website-looks"]', () => void loadWebsiteLooks());
-    $(document).on(`change${NS}`, '#nw-website-extblock', function () { settings.website.extBlockRef = this.value; settings.website.extBlockName = listExtBlockTargets(getContext()).find(target => target.ref === this.value)?.block?.name || settings.website.extBlockName; commitSettings(); render(); });
-    $(document).on(`click${NS}`, '[data-action="site-look-send"]', function () { void sendLookFromWebsite(this.dataset.lookId); });
     $(document).on(`click${NS}`, '[data-action="export-library-look-site"]', function () { void exportLibraryAppearanceToWebsite(this.dataset.lookId); });
-    $(document).on(`click${NS}`, '[data-action="site-look-toggle"]', function () { void toggleLookFromWebsite(this.dataset.lookId); });
-    $(document).on(`click${NS}`, '[data-action="site-look-remove"]', function () { void removeLookFromWebsite(this.dataset.lookId); });
     $(document).on(`change${NS}`, '[data-subject-field]', function () { const row = this.closest('[data-subject-id]'); const subject = findSubject(row?.dataset.subjectId); if (!subject) return; const field = this.dataset.subjectField; if (field === 'name') { subject.name = normalizeName(this.value) || subject.name; this.value = subject.name; } if (field === 'type') subject.type = this.value === 'persona' ? 'persona' : 'character'; if (field === 'color') subject.color = normalizeColor(this.value, subject.color); commitSettings(); });
     $(document).on(`keydown${NS}`, '.nw-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); const alias = normalizeName(this.value); if (!subject || !alias || comparableName(alias) === comparableName(subject.name) || subject.aliases.some(item => comparableName(item) === comparableName(alias))) return; subject.aliases.push(alias); commitSettings(); render(); });
     $(document).on(`click${NS}`, '[data-action="remove-alias"]', function () { const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); if (!subject) return; subject.aliases = subject.aliases.filter(alias => alias !== this.dataset.alias); commitSettings(); render(); });
@@ -1636,7 +1563,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.6.0 ready');
+        console.log('[NESS Wardrobe] v1.6.1 ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');

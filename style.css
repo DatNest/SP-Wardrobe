@@ -1263,25 +1263,6 @@
 
 }
 
-.nw-site-template {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: var(--SmartThemeBorderRadius, 8px);
-    padding: var(--nw-space-3);
-}
-
-.nw-site-template summary {
-    cursor: pointer;
-    font-weight: 700;
-}
-
-.nw-site-template[open] summary {
-    margin-bottom: var(--nw-space-2);
-}
-
-.nw-site-template .menu_button {
-    margin-top: var(--nw-space-2);
-}
-
 .nw-site-looks {
     display: grid;
     gap: var(--nw-space-3);
@@ -1297,10 +1278,6 @@
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: var(--SmartThemeBorderRadius, 8px);
     background: var(--SmartThemeBlurTintColor);
-}
-
-.nw-site-look.disabled {
-    opacity: .72;
 }
 
 .nw-site-look-head {
