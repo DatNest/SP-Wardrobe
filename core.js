@@ -170,7 +170,11 @@ export function normalizeOutfit(value, subjectIds = null, tagIds = null) {
     const now = new Date().toISOString();
     return {
         id: typeof source.id === 'string' && source.id ? source.id : uid('outfit'),
-        name: normalizeName(source.name) || 'Новый наряд',
+        name: normalizeName(source.name) || 'Наряд',
+        chatKey: plainText(source.chatKey, 500),
+        siteCharacterId: plainText(source.siteCharacterId, 160),
+        siteItemId: plainText(source.siteItemId, 160),
+        shelfName: plainText(source.shelfName, 120),
         description: plainText(source.description, 12_000).trim(),
         subjectId: !subjectIds || subjectIds.has(subjectId) ? subjectId : '',
         tagIds: [...new Set(tags.filter(id => !tagIds || tagIds.has(id)))].slice(0, 30),
@@ -182,7 +186,7 @@ export function normalizeOutfit(value, subjectIds = null, tagIds = null) {
 }
 
 export function emptyOutfit(subjectId = '') {
-    return normalizeOutfit({ subjectId, name: 'Новый наряд', description: '', images: [], tagIds: [] });
+    return normalizeOutfit({ subjectId, name: 'Наряд', description: '', images: [], tagIds: [] });
 }
 
 export function normalizeRegexRule(value) {

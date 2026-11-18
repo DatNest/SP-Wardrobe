@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+    addCharacterToWebsiteData,
+    websiteCatalogue,
     addLibraryLookToWebsiteData,
     addOutfitToWebsiteData,
     exportOutfitToWebsite,
@@ -17,7 +19,15 @@ assert.deepEqual(websiteLooks({ looks: [{ id: 'l1', name: '  Ада  ', desc: 'r
 ]);
 assert.equal(imagePayload('data:image/webp;base64,YQ==').extension, 'webp');
 
-const base = { chars: [], cats: [], items: [], looks: [{ id: 'l1', name: 'Ада', desc: 'red hair' }] };
+const base = { chars: [], cats: [], items: [], looks: [{ id: 'l1', name: 'Ада', desc: 'red hair' }], _sync: { version: 4, deleted: { items: { 'old': 8 } } } };
+const createdChar = addCharacterToWebsiteData(base, { id: 'jiji', name: 'Джи', description: 'Description', image: 'images/ji.jpg' });
+assert.equal(createdChar.character.name, 'Джи');
+assert.equal(createdChar.character.img, 'images/ji.jpg');
+assert.deepEqual(createdChar.data._sync, base._sync, 'sync metadata survives character creation');
+const catalogue = websiteCatalogue({ chars: [{ id: 'ch1', name: 'Джи' }], cats: [{ id: 'cat1', char: 'ch1', name: 'Дорожная' }], items: [{ id: 'i1', cat: 'cat1', desc: 'linen cape', img: 'images/cape.png' }] });
+assert.deepEqual(catalogue[0].shelves[0].items[0].desc, 'linen cape');
+assert.equal(catalogue[0].shelves[0].items[0].id, 'i1');
+
 const payload = {
     outfit: { id: 'coat', name: 'Пальто', description: 'Точное описание', favorite: true },
     subject: { id: 'ada', name: 'Ада' },
@@ -30,6 +40,7 @@ assert.equal(first.data.cats.length, 1);
 assert.equal(first.data.items.length, 1);
 assert.equal(first.data.items[0].desc, 'Точное описание');
 assert.deepEqual(first.data.looks, base.looks);
+assert.deepEqual(first.data._sync, base._sync, 'cloud sync tombstones preserved');
 const second = addOutfitToWebsiteData(first.data, { ...payload, imagePath: 'images/coat-new.webp' });
 assert.equal(second.data.items.length, 1, 'repeat export updates the same outfit');
 assert.equal(second.data.items[0].img, 'images/coat-new.webp');

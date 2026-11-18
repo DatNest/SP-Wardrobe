@@ -32,6 +32,7 @@ export function websiteUrls(value) {
 export function normalizeWebsiteData(value) {
     const source = value && typeof value === 'object' ? value : {};
     return {
+        ...source, // Preserve _sync, tombstones and future website metadata.
         chars: Array.isArray(source.chars) ? source.chars.filter(item => item && item.id) : [],
         cats: Array.isArray(source.cats) ? source.cats.filter(item => item && item.id) : [],
         items: Array.isArray(source.items) ? source.items.filter(item => item && item.id) : [],
@@ -45,6 +46,33 @@ export function websiteLooks(value) {
         name: cleanText(item.name, 120) || 'Без имени',
         desc: cleanText(item.desc).replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n'),
     }));
+}
+
+export function websiteCatalogue(value) {
+    const data = normalizeWebsiteData(value);
+    return data.chars.map(char => ({
+        id: String(char.id), name: cleanText(char.name, 120) || 'Без имени',
+        desc: cleanText(char.desc), img: cleanText(char.img, 3000),
+        shelves: data.cats.filter(cat => String(cat.char) === String(char.id)).map(cat => ({
+            id: String(cat.id), name: cleanText(cat.name, 120) || 'Без названия',
+            items: data.items.filter(item => String(item.cat) === String(cat.id) && cleanText(item.desc)).map(item => ({
+                id: String(item.id), desc: cleanText(item.desc), img: cleanText(item.img, 3000),
+            })),
+        })),
+    }));
+}
+
+export function addCharacterToWebsiteData(data, character) {
+    const next = normalizeWebsiteData(data);
+    const name = cleanText(character?.name, 120);
+    if (!name) throw new Error('Введи имя персонажа.');
+    if (next.chars.some(item => comparable(item.name) === comparable(name))) throw new Error(`Персонаж «${name}» уже есть на сайте.`);
+    const record = {
+        id: safeId('ch', character.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`),
+        name, desc: cleanText(character.description), img: cleanText(character.image, 3000),
+    };
+    next.chars.push(record);
+    return { data: next, character: record };
 }
 
 function apiUrl(user, repo, path) {
@@ -186,6 +214,26 @@ export function addLibraryLookToWebsiteData(data, look) {
         next.looks.unshift(record);
     } else next.looks.unshift(record);
     return { data: next, lookId: id, updated: matches.length > 0 };
+}
+
+export async function createCharacterOnWebsite(config, character, fetchImpl = fetch) {
+    if (!String(config?.token || '').trim()) throw new Error('Для создания персонажа нужен GitHub-токен.');
+    let image = '';
+    if (character?.imageDataUrl) {
+        const payload = imagePayload(character.imageDataUrl);
+        image = `images/${safeId('ch', character.id || Date.now())}-${Date.now()}.${payload.extension}`;
+        await putGithubFile(config, image, payload.content, `Character image ${character.name}`, undefined, fetchImpl);
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const current = await readGithubFile(config, DATA_FILE, fetchImpl, true);
+        const merged = addCharacterToWebsiteData(current ? parseWebsiteJson(current.text) : {}, { ...character, image });
+        try {
+            await putGithubFile(config, DATA_FILE, encodeBase64Utf8(`${JSON.stringify(merged.data, null, 1)}\n`), `Add character ${character.name}`, current?.sha, fetchImpl);
+            return merged.character;
+        } catch (error) {
+            if (attempt === 2 || !/409|422|conflict|sha/i.test(String(error.message))) throw error;
+        }
+    }
 }
 
 export async function exportOutfitToWebsite(config, payload, fetchImpl = fetch) {

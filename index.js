@@ -30,7 +30,7 @@ import {
 } from './core.js';
 import { generateOutfit, listConnectionProfiles, testConnectionProfile } from './generation.js';
 import { imageFileFromUrl, prepareImage } from './images.js';
-import { exportLibraryLookToWebsite, exportOutfitToWebsite, loadWebsiteData, websiteLooks } from './site_bridge.js';
+import { createCharacterOnWebsite, exportLibraryLookToWebsite, exportOutfitToWebsite, loadWebsiteData, websiteCatalogue, websiteLooks } from './site_bridge.js';
 import { getWebsiteToken, setWebsiteToken } from './site_token.js';
 import { readNessLibrary, splitWebsiteLooks } from './ness_library_bridge.js';
 
@@ -67,6 +67,8 @@ let profilesLoading = false;
 let profileTestController = null;
 let imageController = null;
 let siteController = null;
+let catalogueController = null;
+let cloudBusy = false;
 let settingsRevision = 0;
 let galleryResultCache = { key: '', outfits: [], subjectById: new Map(), tagById: new Map() };
 
@@ -100,6 +102,9 @@ const ui = {
     libraryLooksOffset: LIBRARY_LOOKS_FIRST,
     websiteOnlyOpen: false,
     websiteLooksOffset: WEBSITE_LOOKS_FIRST,
+    siteCharacters: [], siteLoadedAt: 0, siteLoadBusy: false, siteLoadError: '',
+    characterDropdownOpen: false, characterQuery: '',
+    sitePickerOpen: false, sitePickerTarget: 'library', sitePickerCharacter: '', sitePickerShelf: '', sitePickerQuery: '',
 };
 
 function getSettingsContainer() {
@@ -113,6 +118,7 @@ function loadSettings() {
     settings = normalizeSettings(container[EXTENSION_KEY] || DEFAULT_SETTINGS);
     container[EXTENSION_KEY] = settings;
     settingsRevision++;
+    adoptLegacyOutfits();
 }
 
 function commitSettings() {
@@ -130,6 +136,171 @@ function hasOpenChat(context = getContext()) {
     let chatId = context.chatId;
     try { if (!present(chatId) && typeof context.getCurrentChatId === 'function') chatId = context.getCurrentChatId(); } catch { /* older builds */ }
     return present(chatId) || present(context.groupId) || present(context.characterId) || (Array.isArray(context.chat) && context.chat.length > 0);
+}
+
+function currentChatKey(context = getContext()) {
+    let id = context.chatId;
+    try { if ((id === undefined || id === null || id === '') && typeof context.getCurrentChatId === 'function') id = context.getCurrentChatId(); }
+    catch { /* SillyTavern legacy */ }
+    if (id === undefined || id === null || id === '') return '';
+    const owner = context.groupId !== undefined && context.groupId !== null && context.groupId !== ''
+        ? `group:${context.groupId}` : `char:${context.characterId ?? 'unknown'}`;
+    return `${owner}/chat:${String(id)}`;
+}
+
+function chatOutfits() {
+    const key = currentChatKey();
+    return key ? settings.outfits.filter(outfit => outfit.chatKey === key) : [];
+}
+
+// Existing shared outfits cannot be assigned to past chats retroactively.
+// Pin the legacy collection to the FIRST opened chat, without deleting it.
+function adoptLegacyOutfits() {
+    if (!settings?.outfits?.some(outfit => !outfit.chatKey)) return;
+    const key = currentChatKey();
+    if (!key) return;
+    for (const outfit of settings.outfits) if (!outfit.chatKey) outfit.chatKey = key;
+    const store = getSettingsContainer();
+    if (store) { store[EXTENSION_KEY] = settings; getContext().saveSettingsDebounced?.(); }
+}
+
+function autoOutfitName(subjectName, description) {
+    const summary = normalizeName(String(description || '').slice(0, 45));
+    return `${subjectName || 'Персонаж'} · ${summary || 'Наряд'}`.slice(0, 120);
+}
+
+function ensureSubjectForSite(character) {
+    let subject = settings.subjects.find(item => comparableName(item.name) === comparableName(character.name));
+    if (!subject) {
+        subject = normalizeSubject({ id: uid('subject'), name: character.name, type: 'character' });
+        settings.subjects.push(subject);
+        commitSettings();
+    }
+    return subject;
+}
+
+function getSiteCharacter(id) { return ui.siteCharacters.find(character => character.id === id); }
+
+function siteImageUrl(raw) {
+    if (!raw) return '';
+    try {
+        if (/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(raw)) return raw;
+        const base = settings.website.siteUrl || `https://${settings.website.githubUser}.github.io/${settings.website.githubRepo}/`;
+        const url = new URL(raw, base);
+        return ['https:', 'http:'].includes(url.protocol) ? url.href : '';
+    } catch { return ''; }
+}
+
+function currentCatalogueAge() { return Date.now() - ui.siteLoadedAt; }
+
+async function refreshSiteCatalogue(force = false) {
+    if (ui.siteLoadBusy) return;
+    if (!force && ui.siteLoadedAt && currentCatalogueAge() < 5 * 60_000) return;
+    if (!settings.website.siteUrl && (!settings.website.githubUser || !settings.website.githubRepo)) {
+        ui.siteLoadError = 'Сначала укажи адрес сайта в Настройки → Библиотека.';
+        return;
+    }
+    catalogueController?.abort();
+    const controller = new AbortController();
+    catalogueController = controller;
+    const revision = operationRevision;
+    ui.siteLoadBusy = true;
+    ui.siteLoadError = '';
+    try {
+        const data = await loadWebsiteData(websiteRequestConfig(controller.signal));
+        if (controller.signal.aborted || revision !== operationRevision) return;
+        ui.siteCharacters = websiteCatalogue(data);
+        ui.siteLoadedAt = Date.now();
+        ui.siteLoadError = '';
+    } catch (error) {
+        if (!controller.signal.aborted && revision === operationRevision) ui.siteLoadError = String(error.message || error);
+    } finally {
+        ui.siteLoadBusy = false;
+        if (catalogueController === controller) catalogueController = null;
+        if (managerPopup && revision === operationRevision && (ui.view === 'create' || ui.sitePickerOpen)) render();
+    }
+}
+
+function characterOptionsHtml(query = ui.characterQuery) {
+    const needle = comparableName(query);
+    const records = ui.siteCharacters.filter(char => !needle || comparableName(char.name).includes(needle));
+    return records.map(char => `<button class="menu_button nw-character-option" data-action="choose-site-character" data-character-id="${escapeHtml(char.id)}"><i class="fa-solid fa-user"></i><span>${escapeHtml(char.name)}</span></button>`).join('') || `<small>${ui.siteLoadBusy ? 'Загружаю список…' : 'Совпадений нет.'}</small>`;
+}
+
+function pickerCharactersHtml(query = ui.sitePickerQuery) {
+    const needle = comparableName(query);
+    return ui.siteCharacters.filter(char => !needle || comparableName(char.name).includes(needle))
+        .map(char => `<button class="menu_button nw-picker-character" data-action="site-picker-character" data-character-id="${escapeHtml(char.id)}">${char.img && siteImageUrl(char.img) ? `<img src="${escapeHtml(siteImageUrl(char.img))}" alt="" loading="lazy">` : '<i class="fa-solid fa-user"></i>'}<span>${escapeHtml(char.name)}</span><small>${char.shelves.reduce((n, shelf) => n + shelf.items.length, 0)} нарядов</small></button>`).join('') || '<small>Персонажи не найдены.</small>';
+}
+
+function pickerItemsHtml(query = ui.sitePickerQuery) {
+    const char = getSiteCharacter(ui.sitePickerCharacter);
+    if (!char) return '';
+    const needle = comparableName(query);
+    const shelves = char.shelves.filter(shelf => !ui.sitePickerShelf || shelf.id === ui.sitePickerShelf);
+    const matches = shelves.flatMap(shelf => shelf.items.map(item => ({ ...item, shelf })));
+    const filtered = matches.filter(item => !needle || comparableName(item.desc).includes(needle));
+    const limited = filtered.slice(0, 80);
+    const cards = limited.map(item => `<article class="nw-site-picker-item">${item.img && siteImageUrl(item.img) ? `<img src="${escapeHtml(siteImageUrl(item.img))}" alt="" loading="lazy">` : '<span class="nw-site-item-placeholder"><i class="fa-solid fa-shirt"></i></span>'}<div><small>${escapeHtml(item.shelf.name)}</small><p>${escapeHtml(item.desc)}</p><button class="menu_button menu_button_icon nw-main-action" data-action="site-picker-import" data-item-id="${escapeHtml(item.id)}" data-shelf-id="${escapeHtml(item.shelf.id)}"><i class="fa-solid fa-cloud-arrow-down"></i><span>${ui.sitePickerTarget === 'active' ? 'Заменить в посте' : 'Добавить в этот чат'}</span></button></div></article>`).join('');
+    return (filtered.length > limited.length ? `<small>Показаны первые ${limited.length} из ${filtered.length}. Уточни поиск, чтобы увидеть остальные.</small>` : '') + (cards || '<small>Нарядов по запросу не найдено.</small>');
+}
+
+function sitePickerHtml() {
+    const character = getSiteCharacter(ui.sitePickerCharacter);
+    const filters = character ? `<div class="nw-picker-shelves"><button class="menu_button${!ui.sitePickerShelf ? ' active' : ''}" data-action="site-picker-shelf" data-shelf-id="">Все полки</button>${character.shelves.map(shelf => `<button class="menu_button${shelf.id === ui.sitePickerShelf ? ' active' : ''}" data-action="site-picker-shelf" data-shelf-id="${escapeHtml(shelf.id)}">${escapeHtml(shelf.name)}</button>`).join('')}</div>` : '';
+    return `<div class="nw-site-picker-backdrop"><section class="nw-site-picker" role="dialog" aria-modal="true" aria-label="Одежда с сайта Wardrobe"><div class="nw-picker-top"><div><small>Связанный сайт Wardrobe</small><h3>${character ? escapeHtml(character.name) : 'Выбрать персонажа'}</h3></div><div>${character ? '<button class="menu_button" data-action="site-picker-back" title="К персонажам"><i class="fa-solid fa-arrow-left"></i></button>' : ''}<button class="menu_button" data-action="site-picker-reload" title="Обновить сайт"><i class="fa-solid fa-rotate"></i></button><button class="menu_button" data-action="site-picker-close" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button></div></div><p class="nw-help">В расширение переносится только текст описания одежды. Изображения остаются на сайте.</p><label class="nw-picker-search"><i class="fa-solid fa-magnifying-glass"></i><input id="nw-site-picker-search" type="search" class="text_pole" placeholder="${character ? 'Поиск по описаниям…' : 'Поиск персонажа…'}" value="${escapeHtml(ui.sitePickerQuery)}"></label>${filters}<div id="nw-picker-results" class="nw-site-picker-results">${ui.siteLoadBusy ? '<small>Загружаю каталог…</small>' : ui.siteLoadError ? `<small>${escapeHtml(ui.siteLoadError)}</small>` : character ? pickerItemsHtml() : pickerCharactersHtml()}</div></section></div>`;
+}
+
+async function openSitePicker(target) {
+    if (target === 'active' && !ui.activeEntries.length) return notify('В активном посте пока не найден наряд.', 'warning');
+    ui.sitePickerOpen = true;
+    ui.sitePickerTarget = target === 'active' ? 'active' : 'library';
+    ui.sitePickerCharacter = '';
+    ui.sitePickerShelf = '';
+    ui.sitePickerQuery = '';
+    if (ui.view === 'create') captureDraft();
+    render();
+    await refreshSiteCatalogue();
+}
+
+async function importWebsiteItem(itemId, shelfId) {
+    if (cloudBusy) return;
+    const character = getSiteCharacter(ui.sitePickerCharacter);
+    const shelf = character?.shelves.find(entry => entry.id === shelfId);
+    const item = shelf?.items.find(entry => entry.id === itemId);
+    if (!character || !item?.desc) return notify('Описание больше не найдено. Обнови каталог.', 'warning');
+    const key = currentChatKey();
+    if (!key) return notify('Сначала открой нужный чат.', 'warning');
+    cloudBusy = true;
+    try {
+        if (ui.sitePickerTarget === 'active') {
+            const selected = ui.activeEntries[ui.activeSelected];
+            if (!selected) throw new Error('Выбери наряд в активном посте.');
+            const yes = await Popup.show.confirm('Заменить описание в посте?', `Текст наряда «${escapeHtml(selected.name)}» будет заменён описанием с сайта. Изображение не переносится.`, { okButton: 'Заменить', cancelButton: 'Отмена' });
+            if (!yes) return;
+            await changeActiveEntry('replaceEntry', selected, item.desc);
+            ui.activeStatus = `Наряд ${selected.name} заменён текстом с сайта.`;
+            ui.sitePickerOpen = false;
+            await refreshActiveOutfits();
+            notify('Описание заменено в активном посте.', 'success');
+        } else {
+            const already = chatOutfits().some(outfit => outfit.siteItemId === item.id && outfit.siteCharacterId === character.id);
+            if (already) return notify('Этот наряд уже импортирован в текущий чат.', 'info');
+            const subject = ensureSubjectForSite(character);
+            const outfit = normalizeOutfit({
+                id: uid('outfit'), chatKey: key, subjectId: subject.id, siteCharacterId: character.id,
+                siteItemId: item.id, shelfName: shelf.name, name: autoOutfitName(character.name, item.desc),
+                description: item.desc, images: [], tagIds: [],
+            });
+            settings.outfits.push(outfit);
+            commitSettings();
+            ui.sitePickerOpen = false;
+            ui.status = `Наряд для «${character.name}» добавлен только в этот чат.`;
+            render();
+            notify(ui.status, 'success');
+        }
+    } catch (error) { notify(String(error.message || error), 'error'); }
+    finally { cloudBusy = false; }
 }
 
 function getChatState(create = true) {
@@ -166,7 +337,7 @@ function findTag(id) {
 }
 
 function findOutfit(id) {
-    return settings.outfits.find(outfit => outfit.id === id);
+    return chatOutfits().find(outfit => outfit.id === id);
 }
 
 function floatingDeviceKey() {
@@ -233,7 +404,7 @@ function settingsDrawerHtml() {
         <div class="inline-drawer-toggle inline-drawer-header"><b>👗 NESS Wardrobe</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
         <div class="inline-drawer-content"><div class="nw-drawer-body">
             <label class="checkbox_label"><input id="nw-show-floating" type="checkbox"><span>Показывать плавающую кнопку на этом устройстве</span></label>
-            <small>Библиотека хранится в настройках SillyTavern, закрепления — в текущем чате.</small>
+            <small>Наряды доступны только в чате создания или импорта. Теги и настройки остаются общими.</small>
             <button class="menu_button menu_button_icon" data-action="open"><i class="fa-solid fa-shirt"></i><span>Открыть гардероб</span></button>
         </div></div>
     </div></div>`;
@@ -279,7 +450,7 @@ async function scanLatestWardrobePost() {
 
 function galleryModeTabsHtml() {
     return `<nav class="nw-gallery-mode-tabs" role="tablist" aria-label="Содержимое гардероба">
-        <button class="menu_button${ui.galleryMode === 'library' ? ' active' : ''}" role="tab" aria-selected="${ui.galleryMode === 'library'}" data-gallery-mode="library"><i class="fa-solid fa-box-archive"></i><span>Сохранённые</span><small>${settings.outfits.length}</small></button>
+        <button class="menu_button${ui.galleryMode === 'library' ? ' active' : ''}" role="tab" aria-selected="${ui.galleryMode === 'library'}" data-gallery-mode="library"><i class="fa-solid fa-box-archive"></i><span>Сохранённые</span><small>${chatOutfits().length}</small></button>
         <button class="menu_button${ui.galleryMode === 'active' ? ' active' : ''}" role="tab" aria-selected="${ui.galleryMode === 'active'}" data-gallery-mode="active"><i class="fa-solid fa-message"></i><span>В активном посте</span><small>${ui.activeEntries.length}</small></button>
     </nav>`;
 }
@@ -296,7 +467,7 @@ function activeOutfitsHtml() {
     return `${galleryModeTabsHtml()}<section class="nw-active-workspace">
         <div class="nw-active-context"><div><small>Самый свежий блок среди проверенных постов</small><strong>Пост №${ui.activePostKey}</strong></div><button class="menu_button fa-fw" data-action="refresh-active" title="Обновить" aria-label="Обновить"><i class="fa-solid fa-rotate"></i></button></div>
         <nav class="nw-active-tabs" role="tablist" aria-label="Активные наряды">${tabs}</nav>
-        <section class="nw-active-editor" role="tabpanel"><label><span>Для кого</span><input class="text_pole" value="${escapeHtml(selected.name)}" readonly></label><label><span>Описание одежды</span><textarea id="nw-active-outfit-description" class="text_pole" rows="9" maxlength="12000">${escapeHtml(selected.outfit)}</textarea></label><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="save-active-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить в посте</span></button><button class="menu_button menu_button_icon" data-action="save-active-to-library"><i class="fa-solid fa-box-archive"></i><span>Сохранить как новый наряд</span></button></div><div class="nw-message" role="status">${escapeHtml(ui.activeStatus)}</div></section>
+        <section class="nw-active-editor" role="tabpanel"><label><span>Для кого</span><input class="text_pole" value="${escapeHtml(selected.name)}" readonly></label><label><span>Описание одежды</span><textarea id="nw-active-outfit-description" class="text_pole" rows="9" maxlength="12000">${escapeHtml(selected.outfit)}</textarea></label><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="save-active-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить в посте</span></button><button class="menu_button menu_button_icon" data-action="save-active-to-library"><i class="fa-solid fa-box-archive"></i><span>Сохранить как новый наряд</span></button><button class="menu_button menu_button_icon" data-action="open-site-picker" data-target="active"><i class="fa-solid fa-cloud-arrow-down"></i><span>Заменить нарядом с сайта</span></button></div><div class="nw-message" role="status">${escapeHtml(ui.activeStatus)}</div></section>
     </section>`;
 }
 
@@ -304,13 +475,14 @@ function galleryViewHtml() {
     if (ui.galleryMode === 'active') return activeOutfitsHtml();
     const state = getChatState(false);
     const pinned = new Set(state?.pinnedSubjectIds || []);
-    const orderedSubjects = [...settings.subjects].sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name));
+    const visibleSubjectIds = new Set([...chatOutfits().map(outfit => outfit.subjectId), ...pinned]);
+    const orderedSubjects = settings.subjects.filter(subject => visibleSubjectIds.has(subject.id)).sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name));
     const subjectFilters = orderedSubjects.map(subject => subjectChip(subject, { selected: ui.subjectFilter === subject.id, pinned: pinned.has(subject.id) })).join('');
     const tags = settings.tags.map(tag => tagChip(tag, ui.tagFilters.has(tag.id))).join('');
     const undo = ui.undo ? `<button class="menu_button menu_button_icon" data-action="undo"><i class="fa-solid fa-rotate-left"></i><span>Отменить «${escapeHtml(ui.undo.outfitName)}»</span></button>` : '';
     return `${galleryModeTabsHtml()}<section class="nw-gallery-tools">
         <div class="nw-chat-line"><div><small>Закреплено в чате</small><strong>${escapeHtml(currentChatName())}</strong></div><button class="menu_button fa-fw" data-action="manage-pins" title="Закрепить персон и персонажей" aria-label="Закрепить персон и персонажей"><i class="fa-solid fa-thumbtack"></i></button></div>
-        <div class="nw-search-row"><input id="nw-search" class="text_pole" type="search" placeholder="Найти наряд…" value="${escapeHtml(ui.search)}"><button class="menu_button fa-fw${ui.favoriteOnly ? ' active' : ''}" data-action="favorite-filter" title="Только избранное" aria-label="Только избранное"><i class="fa-solid fa-star"></i></button></div>
+        <div class="nw-search-row"><button class="menu_button nw-site-import-trigger" data-action="open-site-picker" data-target="library" title="Добавить наряд с сайта"><i class="fa-solid fa-link"></i><span>С сайта</span></button><input id="nw-search" class="text_pole" type="search" placeholder="Найти наряд…" value="${escapeHtml(ui.search)}"><button class="menu_button fa-fw${ui.favoriteOnly ? ' active' : ''}" data-action="favorite-filter" title="Только избранное" aria-label="Только избранное"><i class="fa-solid fa-star"></i></button></div>
         <div class="nw-filter-label"><span>Персоны и персонажи</span><button class="menu_button nw-clear-filter${ui.subjectFilter ? '' : ' active'}" data-action="clear-subject">Все</button></div>
         <div class="nw-filter-strip" aria-label="Фильтр по персонажам">${subjectFilters || '<small>Создай персону или персонажа в настройках.</small>'}</div>
         <div class="nw-filter-label"><span>Теги</span>${ui.tagFilters.size ? '<button class="menu_button nw-clear-filter" data-action="clear-tags">Сбросить</button>' : ''}</div>
@@ -324,11 +496,11 @@ function galleryViewHtml() {
 function filteredOutfits() {
     const query = comparableName(ui.search);
     const selectedTags = [...ui.tagFilters].sort();
-    const key = [settingsRevision, query, ui.subjectFilter, Number(ui.favoriteOnly), selectedTags.join('\u0001')].join('\u0000');
+    const key = [settingsRevision, currentChatKey(), query, ui.subjectFilter, Number(ui.favoriteOnly), selectedTags.join('\u0001')].join('\u0000');
     if (galleryResultCache.key === key) return galleryResultCache;
     const subjectById = new Map(settings.subjects.map(subject => [subject.id, subject]));
     const tagById = new Map(settings.tags.map(tag => [tag.id, tag]));
-    const outfits = settings.outfits.filter(outfit => {
+    const outfits = chatOutfits().filter(outfit => {
         if (ui.subjectFilter && outfit.subjectId !== ui.subjectFilter) return false;
         if (ui.favoriteOnly && !outfit.favorite) return false;
         if (selectedTags.length && !selectedTags.every(id => outfit.tagIds.includes(id))) return false;
@@ -352,7 +524,7 @@ function outfitCardHtml(outfit, subjectById, tagById) {
             <span class="nw-outfit-copy"><strong>${escapeHtml(outfit.name)}</strong>${subject ? `<small><i class="fa-solid ${subjectIcon(subject.type)}"></i> ${escapeHtml(subject.name)}</small>` : '<small>Без привязки</small>'}</span>
         </button>
         <div class="nw-card-tags">${tags.map(tag => `<span class="nw-card-tag nw-tag-pill" style="${colorStyle(tag.color)}"><i class="fa-solid fa-tag" aria-hidden="true"></i><span>${escapeHtml(tag.name)}</span></span>`).join('')}</div>
-        <div class="nw-card-actions"><button class="menu_button fa-fw${outfit.favorite ? ' active' : ''}" data-action="toggle-favorite" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Избранное" title="Избранное"><i class="fa-solid fa-star"></i></button><button class="menu_button fa-fw" data-action="export-outfit-site" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Отправить на сайт" title="Отправить на сайт"><i class="fa-solid fa-cloud-arrow-up"></i></button><button class="menu_button fa-fw" data-action="edit-outfit" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Редактировать" title="Редактировать"><i class="fa-solid fa-pen"></i></button></div>
+        <div class="nw-card-actions"><button class="menu_button fa-fw${outfit.favorite ? ' active' : ''}" data-action="toggle-favorite" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Избранное" title="Избранное"><i class="fa-solid fa-star"></i></button><button class="menu_button fa-fw" data-action="export-outfit-site" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Отправить на сайт" title="Отправить на сайт"><i class="fa-solid fa-cloud-arrow-up"></i></button><button class="menu_button fa-fw" data-action="edit-outfit" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Редактировать" title="Редактировать"><i class="fa-solid fa-pen"></i></button><button class="menu_button fa-fw" data-action="delete-saved-outfit" data-outfit-id="${escapeHtml(outfit.id)}" aria-label="Удалить наряд" title="Удалить наряд"><i class="fa-solid fa-trash"></i></button></div>
     </article>`;
 }
 
@@ -371,7 +543,7 @@ function renderGalleryGrid(reset = true) {
         grid.replaceChildren();
     }
     if (!outfits.length) {
-        grid.innerHTML = emptyHtml(settings.outfits.length ? 'Ничего не найдено' : 'Гардероб пуст', settings.outfits.length ? 'Сбрось часть фильтров или измени поиск.' : 'Создай первый наряд во второй вкладке.');
+        grid.innerHTML = emptyHtml(chatOutfits().length ? 'Ничего не найдено' : 'Гардероб пуст', chatOutfits().length ? 'Сбрось часть фильтров или измени поиск.' : 'Создай первый наряд во второй вкладке.');
         return;
     }
     const amount = ui.galleryOffset ? GALLERY_MORE : GALLERY_FIRST;
@@ -402,7 +574,8 @@ function renderGalleryGrid(reset = true) {
 function ensureDraft() {
     if (!ui.draft) {
         const state = getChatState(false);
-        ui.draft = emptyOutfit(state?.pinnedSubjectIds?.[0] || settings.subjects[0]?.id || '');
+        ui.draft = emptyOutfit(state?.pinnedSubjectIds?.[0] || '');
+        ui.draft.chatKey = currentChatKey();
     }
     return ui.draft;
 }
@@ -415,6 +588,8 @@ function captureSubjectCreator() {
         if (name) ui.subjectCreator.name = name.value;
         if (type) ui.subjectCreator.type = type.value === 'persona' ? 'persona' : 'character';
         if (color) ui.subjectCreator.color = color.value;
+        const description = document.getElementById('nw-inline-site-description');
+        if (description) ui.subjectCreator.description = description.value;
     }
 }
 
@@ -424,6 +599,7 @@ function inlineSubjectCreatorHtml() {
     return `<section class="settingsSectionWrap nw-inline-creator" aria-label="Создание персоны или персонажа">
         <div class="nw-inline-creator-head"><div><small>${editor.assignToDraft ? 'Новая привязка для наряда' : 'Новая запись библиотеки'}</small><strong>Добавить персону или персонажа</strong></div><button class="menu_button fa-fw" data-action="cancel-inline-subject" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button></div>
         <div class="nw-settings-grid"><label><span>Имя</span><input id="nw-inline-subject-name" class="text_pole" maxlength="120" placeholder="Например: Зуко" value="${escapeHtml(editor.name)}"></label><label><span>Кто это</span><select id="nw-inline-subject-type" class="text_pole"><option value="character" ${editor.type === 'character' ? 'selected' : ''}>Персонаж или NPC ◆</option><option value="persona" ${editor.type === 'persona' ? 'selected' : ''}>Персона пользователя ●</option></select></label><label class="nw-color-field"><span>Цвет метки</span><input id="nw-inline-subject-color" type="color" value="${escapeHtml(editor.color)}"></label></div>
+        ${editor.assignToDraft ? `<label><span>Описание персонажа на сайте <small>необязательно</small></span><textarea id="nw-inline-site-description" class="text_pole" rows="3" maxlength="12000" placeholder="Описание, как на сайте">${escapeHtml(editor.description || '')}</textarea></label><label class="nw-site-avatar-upload"><span>Изображение персонажа <small>необязательно</small></span>${editor.imageDataUrl ? `<img src="${escapeHtml(editor.imageDataUrl)}" alt="Предпросмотр" loading="lazy">` : ''}<input id="nw-site-character-image" type="file" accept="image/*" class="text_pole"></label><small>Этот персонаж появится на сайте Wardrobe.</small>` : ''}
         <div class="nw-aliases"><small>Другие имена <span>необязательно</span></small><div class="nw-alias-chips">${editor.aliases.map(alias => `<button class="menu_button nw-alias-chip nw-tag-pill" style="${colorStyle(editor.color)}" data-action="remove-inline-alias" data-alias="${escapeHtml(alias)}" title="Удалить имя ${escapeHtml(alias)}"><i class="fa-solid fa-user" aria-hidden="true"></i><span>${escapeHtml(alias)}</span><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`).join('')}<input id="nw-inline-alias-input" class="text_pole nw-alias-input" placeholder="Введи имя и нажми Enter"></div></div>
         <div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="create-inline-subject"><i class="fa-solid fa-plus"></i><span>${editor.assignToDraft ? 'Добавить и выбрать' : 'Создать'}</span></button><button class="menu_button" data-action="cancel-inline-subject">Отмена</button></div>
         <div class="nw-message" role="status">${escapeHtml(editor.error || '')}</div>
@@ -433,12 +609,10 @@ function inlineSubjectCreatorHtml() {
 function captureDraft() {
     captureSubjectCreator();
     if (ui.view !== 'create' || !ui.draft) return;
-    const name = document.getElementById('nw-outfit-name');
     const description = document.getElementById('nw-outfit-description');
-    const subject = document.getElementById('nw-outfit-subject');
-    if (name) ui.draft.name = name.value;
+    const shelf = document.getElementById('nw-outfit-shelf');
     if (description) ui.draft.description = description.value;
-    if (subject) ui.draft.subjectId = subject.value;
+    if (shelf) ui.draft.shelfName = shelf.value;
     const target = document.getElementById('nw-generate-target');
     const wishes = document.getElementById('nw-generate-wishes');
     const avoid = document.getElementById('nw-generate-avoid');
@@ -463,7 +637,9 @@ function updateDraftTagResults(value) {
 
 function createViewHtml() {
     const draft = ensureDraft();
-    const subjects = settings.subjects.map(subject => `<option value="${escapeHtml(subject.id)}" ${draft.subjectId === subject.id ? 'selected' : ''}>${subject.type === 'persona' ? '●' : '◆'} ${escapeHtml(subject.name)} — ${subjectTypeLabel(subject.type)}</option>`).join('');
+    const siteCharacter = getSiteCharacter(draft.siteCharacterId);
+    const selectedName = siteCharacter?.name || findSubject(draft.subjectId)?.name || '';
+    const shelfOptions = (siteCharacter?.shelves || []).map(shelf => `<option value="${escapeHtml(shelf.name)}"></option>`).join('');
     const images = draft.images.map((image, index) => `<article class="nw-image-preview" data-image-id="${escapeHtml(image.id)}"><img src="${image.dataUrl}" alt="${escapeHtml(index === 0 ? 'Обложка наряда' : 'Изображение шоукейса')}"><div><small>${index === 0 ? 'Обложка' : `Шоукейс ${index}`}</small>${index > 0 ? `<button class="menu_button" data-action="make-cover" data-image-id="${escapeHtml(image.id)}">Сделать обложкой</button>` : ''}<button class="menu_button fa-fw" data-action="remove-image" data-image-id="${escapeHtml(image.id)}" aria-label="Удалить изображение"><i class="fa-solid fa-trash"></i></button></div></article>`).join('');
     const generate = ui.createMode === 'generate' ? `<section class="settingsSectionWrap nw-generator">
         <label><span>Для кого создать наряд</span><input id="nw-generate-target" class="text_pole" list="nw-subject-names" maxlength="120" placeholder="Имя персонажа или NPC" value="${escapeHtml(ui.generator.target || findSubject(draft.subjectId)?.name || '')}"></label>
@@ -477,10 +653,10 @@ function createViewHtml() {
     return `<section class="nw-create-head"><div class="nw-create-method"><small>Как подготовить описание</small><div class="nw-mode-switch" role="group" aria-label="Способ создания"><button class="menu_button${ui.createMode === 'write' ? ' active' : ''}" data-action="create-mode" data-mode="write" aria-pressed="${ui.createMode === 'write'}"><i class="fa-solid fa-pen"></i><span>Написать</span></button><button class="menu_button${ui.createMode === 'generate' ? ' active' : ''}" data-action="create-mode" data-mode="generate" aria-pressed="${ui.createMode === 'generate'}"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать</span></button></div></div><button class="menu_button menu_button_icon nw-new-draft" data-action="reset-draft"><i class="fa-solid fa-file-circle-plus"></i><span>Новый черновик</span></button></section>
         ${generate}
         <section class="nw-outfit-form">
-            <section class="nw-form-card" aria-labelledby="nw-details-heading"><div class="nw-form-card-head"><div><strong id="nw-details-heading">Детали наряда</strong><small>Название, привязка и текст для поста</small></div></div><label><span>Название</span><input id="nw-outfit-name" class="text_pole" maxlength="120" value="${escapeHtml(draft.name)}"></label><label><span>Для кого этот наряд</span><div class="nw-field-row"><select id="nw-outfit-subject" class="text_pole"><option value="">Выбрать персону или персонажа…</option>${subjects}</select><button class="menu_button menu_button_icon" data-action="quick-subject"><i class="fa-solid fa-user-plus"></i><span>Добавить</span></button></div></label>${inlineSubjectCreatorHtml()}<label><span>Описание одежды</span><textarea id="nw-outfit-description" class="text_pole" rows="5" maxlength="12000" placeholder="Текст, который будет вставлен в пост">${escapeHtml(draft.description)}</textarea></label></section>
+            <section class="nw-form-card" aria-labelledby="nw-details-heading"><div class="nw-form-card-head"><div><strong id="nw-details-heading">Детали наряда</strong><small>Персонаж с сайта, полка и описание одежды</small></div></div><div class="nw-site-character-field"><span>Для кого этот наряд</span><div class="nw-field-row"><button class="menu_button nw-character-combo-trigger" data-action="toggle-character-dropdown" aria-expanded="${ui.characterDropdownOpen}"><i class="fa-solid fa-user"></i><span>${escapeHtml(selectedName || 'Выбрать персонажа с сайта…')}</span><i class="fa-solid fa-chevron-down"></i></button><button class="menu_button menu_button_icon" data-action="refresh-site-characters" title="Обновить список с сайта"><i class="fa-solid fa-rotate"></i></button><button class="menu_button menu_button_icon" data-action="quick-subject" title="Создать персонажа на сайте"><i class="fa-solid fa-user-plus"></i><span>Добавить</span></button></div>${ui.characterDropdownOpen ? `<div class="nw-character-menu"><label class="nw-character-search"><i class="fa-solid fa-magnifying-glass"></i><input id="nw-character-search" class="text_pole" type="search" autocomplete="off" placeholder="Поиск по персонажам…" value="${escapeHtml(ui.characterQuery)}"></label><div id="nw-character-options" class="nw-character-options">${characterOptionsHtml()}</div></div>` : ''}<small>${escapeHtml(ui.siteLoadBusy ? 'Загружаю персонажей…' : ui.siteLoadError || (!ui.siteCharacters.length ? 'На сайте пока нет персонажей.' : 'Список загружен с сайта.'))}</small></div><label><span>Полка на сайте</span><input id="nw-outfit-shelf" class="text_pole" maxlength="120" list="nw-site-shelves" placeholder="Существующая или новая полка" value="${escapeHtml(draft.shelfName || '')}"><datalist id="nw-site-shelves">${shelfOptions}</datalist></label>${inlineSubjectCreatorHtml()}<label><span>Описание одежды</span><textarea id="nw-outfit-description" class="text_pole" rows="5" maxlength="12000" placeholder="Текст, который будет вставлен в пост">${escapeHtml(draft.description)}</textarea></label></section>
             <section class="nw-form-card nw-tag-picker" aria-labelledby="nw-tags-heading"><div class="nw-form-card-head"><div><strong id="nw-tags-heading">Теги</strong><small>Ищи существующий или введи новое название</small></div><small>Enter — выбрать или создать</small></div><label class="nw-tag-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="nw-tag-search" class="text_pole" type="search" maxlength="120" autocomplete="off" placeholder="Найти тег по названию…" value="${escapeHtml(ui.tagSearch)}"></label><div id="nw-draft-tag-results" class="nw-filter-strip nw-draft-tags" aria-live="polite">${draftTagResultsHtml()}</div></section>
             <section class="nw-form-card" aria-labelledby="nw-images-heading"><div class="nw-form-card-head"><div><strong id="nw-images-heading">Обложка и шоукейс</strong><small>До трёх изображений; первое станет обложкой</small></div><span class="nw-counter">${draft.images.length}/3</span></div><div class="nw-image-list">${images || '<small class="nw-media-empty">Изображения пока не добавлены.</small>'}</div><div class="nw-image-source-actions"><label class="menu_button nw-file-button${draft.images.length >= 3 ? ' disabled' : ''}"><i class="fa-solid fa-folder-open"></i><span>С устройства</span><input id="nw-image-files" type="file" accept="image/*" multiple hidden ${draft.images.length >= 3 ? 'disabled' : ''}></label><button class="menu_button menu_button_icon" data-action="add-image-url" ${draft.images.length >= 3 ? 'disabled' : ''}><i class="fa-solid fa-link"></i><span>По ссылке</span></button><button class="menu_button menu_button_icon" data-action="paste-image" ${draft.images.length >= 3 ? 'disabled' : ''}><i class="fa-solid fa-clipboard"></i><span>Из буфера</span></button></div><div id="nw-image-status" class="nw-message" role="status" aria-live="polite"></div></section>
-            <div class="nw-form-actions nw-form-footer"><button class="menu_button menu_button_icon nw-main-action" data-action="save-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить наряд</span></button>${settings.outfits.some(outfit => outfit.id === draft.id) ? `<button class="menu_button menu_button_icon" data-action="export-outfit-site" data-outfit-id="${escapeHtml(draft.id)}"><i class="fa-solid fa-cloud-arrow-up"></i><span>На сайт</span></button><button class="menu_button menu_button_icon" data-action="delete-outfit"><i class="fa-solid fa-trash"></i><span>Удалить</span></button>` : ''}</div>
+            <div class="nw-form-actions nw-form-footer"><button class="menu_button menu_button_icon nw-main-action" data-action="save-outfit"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить наряд</span></button>${Boolean(findOutfit(draft.id)) ? `<button class="menu_button menu_button_icon" data-action="export-outfit-site" data-outfit-id="${escapeHtml(draft.id)}"><i class="fa-solid fa-cloud-arrow-up"></i><span>На сайт</span></button><button class="menu_button menu_button_icon" data-action="delete-outfit"><i class="fa-solid fa-trash"></i><span>Удалить</span></button>` : ''}</div>
         </section>`;
 }
 
@@ -488,6 +664,7 @@ function subjectSettingsRow(subject) {
     return `<article class="nw-settings-row" data-subject-id="${escapeHtml(subject.id)}">
         <div class="nw-settings-row-head"><span class="nw-type-badge nw-${subject.type}" style="${colorStyle(subject.color)}"><i class="fa-solid ${subjectIcon(subject.type)}"></i>${subjectTypeLabel(subject.type)}</span><button class="menu_button fa-fw" data-action="delete-subject" aria-label="Удалить" title="Удалить"><i class="fa-solid fa-trash"></i></button></div>
         <div class="nw-settings-grid"><label><span>Имя</span><input class="text_pole" data-subject-field="name" maxlength="120" value="${escapeHtml(subject.name)}"></label><label><span>Тип</span><select class="text_pole" data-subject-field="type"><option value="character" ${subject.type === 'character' ? 'selected' : ''}>Персонаж</option><option value="persona" ${subject.type === 'persona' ? 'selected' : ''}>Персона</option></select></label><label class="nw-color-field"><span>Цвет</span><input type="color" data-subject-field="color" value="${escapeHtml(subject.color)}"></label></div>
+        ${editor.assignToDraft ? `<label><span>Описание персонажа на сайте <small>необязательно</small></span><textarea id="nw-inline-site-description" class="text_pole" rows="3" maxlength="12000" placeholder="Описание, как на сайте">${escapeHtml(editor.description || '')}</textarea></label><label class="nw-site-avatar-upload"><span>Изображение персонажа <small>необязательно</small></span>${editor.imageDataUrl ? `<img src="${escapeHtml(editor.imageDataUrl)}" alt="Предпросмотр" loading="lazy">` : ''}<input id="nw-site-character-image" type="file" accept="image/*" class="text_pole"></label><small>Этот персонаж появится на сайте Wardrobe.</small>` : ''}
         <div class="nw-aliases"><small>Другие имена для поиска в посте</small><div class="nw-alias-chips">${subject.aliases.map(alias => `<button class="menu_button nw-alias-chip nw-tag-pill" style="${colorStyle(subject.color)}" data-action="remove-alias" data-alias="${escapeHtml(alias)}" title="Удалить имя ${escapeHtml(alias)}"><i class="fa-solid fa-user" aria-hidden="true"></i><span>${escapeHtml(alias)}</span><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`).join('')}<input class="text_pole nw-alias-input" placeholder="Введи имя и нажми Enter"></div></div>
     </article>`;
 }
@@ -585,7 +762,8 @@ function render() {
     const content = document.getElementById('nw-content');
     if (content) {
         content.classList.toggle('nw-content-settings', ui.view === 'settings');
-        content.innerHTML = ui.view === 'create' ? createViewHtml() : ui.view === 'settings' ? settingsViewHtml() : galleryViewHtml();
+        content.innerHTML = (ui.view === 'create' ? createViewHtml() : ui.view === 'settings' ? settingsViewHtml() : galleryViewHtml()) + (ui.sitePickerOpen ? sitePickerHtml() : '');
+        if (ui.view === 'create' && !ui.siteLoadedAt && !ui.siteLoadBusy && !ui.siteLoadError) void refreshSiteCatalogue();
         if (ui.view === 'gallery' && ui.galleryMode === 'library') requestAnimationFrame(() => renderGalleryGrid(true));
         if (ui.view === 'gallery' && ui.galleryMode === 'active' && ui.activeNeedsRefresh && !ui.activeLoading) void refreshActiveOutfits();
         if (ui.view === 'settings' && ui.settingsTab === 'connection' && !profilesLoaded && !profilesLoading) void refreshConnectionProfiles(false);
@@ -611,6 +789,9 @@ function showPanel() {
             profileTestController = null;
             siteController?.abort();
             siteController = null;
+            catalogueController?.abort();
+            catalogueController = null;
+            ui.sitePickerOpen = false;
             ui.websiteLoading = false;
             disposeGalleryObserver();
             clearTimeout(searchTimer);
@@ -697,6 +878,7 @@ async function saveSettingsForm({ silent = false } = {}) {
                 githubRepo: document.getElementById('nw-website-repo')?.value.trim() || '',
             };
             changed = JSON.stringify(settings.website) !== JSON.stringify(next);
+            if (changed) { ui.siteLoadedAt = 0; ui.siteCharacters = []; ui.siteLoadError = ''; }
             settings.website = next;
             const tokenField = document.getElementById('nw-website-token');
             if (tokenField) setWebsiteToken(tokenField.value);
@@ -936,7 +1118,8 @@ function saveActiveToLibrary() {
     if (!selected) return;
     const subject = subjectForActiveName(selected.name);
     ui.draft = emptyOutfit(subject?.id || '');
-    ui.draft.name = `Наряд — ${selected.name}`;
+    ui.draft.chatKey = currentChatKey();
+    ui.draft.name = autoOutfitName(selected.name, selected.outfit);
     ui.draft.description = document.getElementById('nw-active-outfit-description')?.value.trim() || selected.outfit;
     ui.createMode = 'write';
     ui.subjectCreator = null;
@@ -953,34 +1136,47 @@ function openInlineSubjectCreator(type = 'character', assignToDraft = false) {
         color: type === 'persona' ? '#7899a8' : '#9a765f',
         aliases: [],
         assignToDraft,
+        description: '', imageDataUrl: '',
         error: '',
     };
     render();
     requestAnimationFrame(() => document.getElementById('nw-inline-subject-name')?.focus());
 }
 
-function createInlineSubject() {
+async function createInlineSubject() {
+    if (cloudBusy) return;
     captureDraft();
     const editor = ui.subjectCreator;
     if (!editor) return;
     const name = normalizeName(editor.name);
-    if (!name) {
-        editor.error = 'Заполни имя персоны или персонажа.';
-        render();
-        return;
+    if (!name) { editor.error = 'Заполни имя персонажа.'; render(); return; }
+    const existingSubject = settings.subjects.find(subject => comparableName(subject.name) === comparableName(name));
+    if (existingSubject && !editor.assignToDraft) {
+        editor.error = 'Такое имя уже есть. Выбери существующую запись.'; render(); return;
     }
-    if (settings.subjects.some(subject => comparableName(subject.name) === comparableName(name))) {
-        editor.error = 'Такое имя уже есть. Выбери существующую запись или добавь уточнение к имени.';
+    const subject = existingSubject || normalizeSubject({ id: uid('subject'), name, type: editor.type, color: editor.color, aliases: editor.aliases });
+    cloudBusy = true;
+    try {
+        if (editor.assignToDraft) {
+            if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) throw new Error('Укажи GitHub и токен в Настройки → Библиотека.');
+            const created = await createCharacterOnWebsite(websiteRequestConfig(), {
+                id: subject.id, name, description: editor.description, imageDataUrl: editor.imageDataUrl,
+            });
+            ui.draft.subjectId = subject.id;
+            ui.draft.siteCharacterId = created.id;
+            ui.draft.shelfName = '';
+            ui.siteLoadedAt = 0;
+            ui.siteLoadError = '';
+            ui.characterDropdownOpen = false;
+        }
+        if (!existingSubject) settings.subjects.push(subject);
+        ui.subjectCreator = null;
+        commitSettings();
         render();
-        return;
-    }
-    const subject = normalizeSubject({ id: uid('subject'), name, type: editor.type, color: editor.color, aliases: editor.aliases });
-    settings.subjects.push(subject);
-    if (editor.assignToDraft && ui.draft) ui.draft.subjectId = subject.id;
-    ui.subjectCreator = null;
-    commitSettings();
-    render();
-    notify(`${subjectTypeLabel(subject.type)} «${subject.name}» создан${subject.type === 'persona' ? 'а' : ''}.`, 'success');
+        notify(`Персонаж «${subject.name}» создан${editor.assignToDraft ? ' на сайте' : ''}.`, 'success');
+        if (editor.assignToDraft) void refreshSiteCatalogue(true);
+    } catch (error) { editor.error = String(error.message || error); render(); }
+    finally { cloudBusy = false; }
 }
 
 async function openTagCreatorPopup(prefill = '', assignToDraft = false) {
@@ -1119,35 +1315,100 @@ function pasteImageFromClipboard() {
     return addImageSources(clipboardImageSources, 'Читаю изображение из буфера…');
 }
 
-function saveOutfit() {
+async function saveOutfit() {
+    if (cloudBusy) return;
     captureDraft();
     const draft = ui.draft;
-    const name = normalizeName(draft.name);
-    if (!name) return setMessage('nw-image-status', 'Заполни название наряда.');
-    if (!findSubject(draft.subjectId)) return setMessage('nw-image-status', 'Выбери персону или персонажа.');
-    if (!String(draft.description || '').trim()) return setMessage('nw-image-status', 'Заполни описание одежды.');
-    const normalized = normalizeOutfit({ ...draft, name, updatedAt: new Date().toISOString() }, new Set(settings.subjects.map(item => item.id)), new Set(settings.tags.map(item => item.id)));
-    const index = settings.outfits.findIndex(outfit => outfit.id === normalized.id);
+    const key = currentChatKey();
+    if (!key) return notify('Сначала открой чат, в котором сохранить наряд.', 'warning');
+    if (!draft?.description?.trim()) return notify('Заполни описание одежды.', 'warning');
+    let subject = findSubject(draft.subjectId);
+    const siteCharacter = getSiteCharacter(draft.siteCharacterId);
+    if (siteCharacter) subject = ensureSubjectForSite(siteCharacter);
+    if (!subject) return notify('Выбери персонажа из списка сайта.', 'warning');
+    const name = autoOutfitName(subject.name, draft.description);
+    const normalized = normalizeOutfit({ ...draft, name, subjectId: subject.id, chatKey: key, updatedAt: new Date().toISOString() },
+        new Set(settings.subjects.map(item => item.id)), new Set(settings.tags.map(item => item.id)));
+    const index = settings.outfits.findIndex(outfit => outfit.id === normalized.id && outfit.chatKey === key);
     if (index >= 0) settings.outfits[index] = normalized;
     else settings.outfits.push(normalized);
-    commitSettings();
+    commitSettings(); // Always save the local version BEFORE network operations.
     ui.draft = clone(normalized);
-    notify(`Наряд «${normalized.name}» сохранён.`, 'success');
+    cloudBusy = true;
+    try {
+        if (normalized.images[0] && normalized.siteCharacterId && normalized.shelfName && getWebsiteToken() && settings.website.githubRepo && settings.website.githubUser) {
+            const result = await exportOutfitToWebsite(websiteRequestConfig(), { outfit: normalized, subject, shelfName: normalized.shelfName });
+            normalized.siteItemId = result.itemId;
+            const saved = settings.outfits.find(outfit => outfit.id === normalized.id && outfit.chatKey === key);
+            if (saved) saved.siteItemId = result.itemId;
+            commitSettings();
+            ui.siteLoadedAt = 0;
+            ui.siteLoadError = '';
+            notify('Наряд сохранён в этом чате и отправлен на сайт.', 'success');
+        } else {
+            notify('Наряд сохранён в этом чате. Для отправки на сайт выбери персонажа, полку, изображение и настрой токен.', 'info');
+        }
+        ui.view = 'gallery';
+        ui.status = '';
+        render();
+    } catch (error) {
+        ui.status = `Локальная копия сохранена. Не удалось отправить на сайт: ${error.message || error}`;
+        ui.draft = clone(normalized);
+        render();
+        notify(ui.status, 'error');
+    } finally { cloudBusy = false; }
+}
+
+async function deleteSavedOutfit(id) {
+    if (cloudBusy) return;
+    const outfit = findOutfit(id);
+    if (!outfit) return;
+    // Declining a cloud transfer does not immediately delete anything.
+    const upload = await Popup.show.confirm('Удаление наряда',
+        `«${escapeHtml(outfit.name)}» будет удалён из этого чата навсегда. Перед удалением перенести его в облачный каталог Wardrobe?`,
+        { okButton: 'Перенести на сайт', cancelButton: 'Не переносить' });
+    if (!findOutfit(id)) return;
+    if (upload && !outfit.siteItemId) {
+        const subject = findSubject(outfit.subjectId);
+        if (!subject || !outfit.images[0] || !getWebsiteToken() || !settings.website.githubUser || !settings.website.githubRepo) {
+            notify('Для переноса на сайт нужны персонаж, изображение и подключение GitHub. Ничего не удалено.', 'warning');
+            return;
+        }
+        cloudBusy = true;
+        try {
+            const shelfName = outfit.shelfName || outfit.tagIds.map(tagId => findTag(tagId)?.name).find(Boolean) || 'Образы';
+            await exportOutfitToWebsite(websiteRequestConfig(), { outfit, subject, shelfName });
+            ui.siteLoadedAt = 0;
+            ui.siteLoadError = '';
+            notify('Наряд успешно сохранён на сайте.', 'success');
+        } catch (error) {
+            notify(`Перенос не выполнен, наряд сохранён в чате: ${error.message || error}`, 'error');
+            return;
+        } finally { cloudBusy = false; }
+    }
+    if (upload && outfit.siteItemId) {
+        cloudBusy = true;
+        try {
+            const remote = websiteCatalogue(await loadWebsiteData(websiteRequestConfig()));
+            const exists = remote.some(char => char.id === outfit.siteCharacterId && char.shelves.some(shelf => shelf.items.some(item => item.id === outfit.siteItemId)));
+            if (!exists) throw new Error('Наряд не найден на сайте. Локальную копию не удаляю.');
+            notify('Наряд уже сохранён на сайте. Из облака он не удаляется.', 'info');
+        } catch (error) { notify(`Не удалось подтвердить облачную копию: ${error.message || error}`, 'warning'); return; }
+        finally { cloudBusy = false; }
+    }
+    const confirmed = await Popup.show.confirm('Удалить наряд из чата навсегда?',
+        `«${escapeHtml(outfit.name)}» и его локальные изображения будут удалены без возможности восстановления. Данные на сайте останутся.`,
+        { okButton: 'Удалить навсегда', cancelButton: 'Отмена' });
+    if (!confirmed || !findOutfit(id)) return;
+    settings.outfits = settings.outfits.filter(item => item.id !== id);
+    commitSettings();
+    if (ui.draft?.id === id) ui.draft = null;
     ui.view = 'gallery';
-    ui.status = '';
     render();
 }
 
 async function deleteOutfit() {
-    const outfit = findOutfit(ui.draft?.id);
-    if (!outfit) return;
-    const confirmed = await Popup.show.confirm('Удалить наряд?', `«${escapeHtml(outfit.name)}» и его изображения будут удалены из библиотеки.`, { okButton: 'Удалить', cancelButton: 'Отмена' });
-    if (!confirmed) return;
-    settings.outfits = settings.outfits.filter(item => item.id !== outfit.id);
-    commitSettings();
-    ui.draft = null;
-    ui.view = 'gallery';
-    render();
+    if (ui.draft?.id) await deleteSavedOutfit(ui.draft.id);
 }
 
 async function generateFromForm() {
@@ -1169,11 +1430,9 @@ async function generateFromForm() {
             outfitTemplate: settings.prompts.outfit,
         }, generationController.signal, message => setMessage('nw-generation-status', message));
         if (ownRevision !== operationRevision || ui.view !== 'create' || ui.createMode !== 'generate') return;
-        ui.draft.name = result.name;
+        ui.draft.name = autoOutfitName(findSubject(ui.draft.subjectId)?.name || result.name, result.description);
         ui.draft.description = result.description;
-        const name = document.getElementById('nw-outfit-name');
         const description = document.getElementById('nw-outfit-description');
-        if (name) name.value = result.name;
         if (description) description.value = result.description;
         setMessage('nw-generation-status', 'Описание готово. Проверь его и нажми «Сохранить наряд».');
     } catch (error) {
@@ -1310,6 +1569,7 @@ async function importSettings(file) {
         const confirmed = await Popup.show.confirm('Заменить библиотеку?', `Будет загружено: ${imported.outfits.length} нарядов, ${imported.subjects.length} персон и персонажей, ${imported.tags.length} тегов. Текущая библиотека будет заменена.`, { okButton: 'Импортировать', cancelButton: 'Отмена' });
         if (!confirmed) return;
         settings = imported;
+        adoptLegacyOutfits();
         commitSettings();
         const state = getChatState(false);
         if (state) saveChatState();
@@ -1443,6 +1703,8 @@ function bindEvents() {
         siteController?.abort();
         siteController = null;
         ui.websiteLoading = false;
+        ui.sitePickerOpen = false;
+        ui.characterDropdownOpen = false;
         ui.subjectCreator = null;
         ui.tagSearch = '';
         ui.view = nextView;
@@ -1502,6 +1764,57 @@ function bindEvents() {
         this.scrollLeft += wheel.deltaY;
         if (this.scrollLeft !== before) event.preventDefault();
     });
+    $(document).on(`click${NS}`, '[data-action="open-site-picker"]', function () { void openSitePicker(this.dataset.target); });
+    $(document).on(`click${NS}`, '[data-action="site-picker-close"]', () => { ui.sitePickerOpen = false; render(); });
+    $(document).on(`click${NS}`, '[data-action="site-picker-reload"]', () => { void refreshSiteCatalogue(true); });
+    $(document).on(`click${NS}`, '[data-action="site-picker-back"]', () => { ui.sitePickerCharacter = ''; ui.sitePickerShelf = ''; ui.sitePickerQuery = ''; render(); });
+    $(document).on(`click${NS}`, '[data-action="site-picker-character"]', function () { ui.sitePickerCharacter = this.dataset.characterId; ui.sitePickerShelf = ''; ui.sitePickerQuery = ''; render(); });
+    $(document).on(`click${NS}`, '[data-action="site-picker-shelf"]', function () { ui.sitePickerShelf = this.dataset.shelfId || ''; render(); });
+    $(document).on(`input${NS}`, '#nw-site-picker-search', function () {
+        ui.sitePickerQuery = this.value;
+        const target = document.getElementById('nw-picker-results');
+        if (target) target.innerHTML = ui.sitePickerCharacter ? pickerItemsHtml() : pickerCharactersHtml();
+    });
+    $(document).on(`click${NS}`, '[data-action="site-picker-import"]', function () { void importWebsiteItem(this.dataset.itemId, this.dataset.shelfId); });
+    $(document).on(`click${NS}`, '[data-action="toggle-character-dropdown"]', () => {
+        captureDraft();
+        ui.characterDropdownOpen = !ui.characterDropdownOpen;
+        ui.characterQuery = '';
+        render();
+        if (ui.characterDropdownOpen) requestAnimationFrame(() => document.getElementById('nw-character-search')?.focus());
+    });
+    $(document).on(`input${NS}`, '#nw-character-search', function () {
+        ui.characterQuery = this.value;
+        const options = document.getElementById('nw-character-options');
+        if (options) options.innerHTML = characterOptionsHtml();
+    });
+    $(document).on(`keydown${NS}`, '#nw-character-search', function (event) {
+        if (event.key === 'Escape') { ui.characterDropdownOpen = false; render(); }
+        if (event.key === 'Enter') { event.preventDefault(); document.querySelector('#nw-character-options [data-action="choose-site-character"]')?.click(); }
+    });
+    $(document).on(`click${NS}`, '[data-action="choose-site-character"]', function () {
+        captureDraft();
+        const char = getSiteCharacter(this.dataset.characterId);
+        if (!char) return;
+        const subject = ensureSubjectForSite(char);
+        ui.draft.siteCharacterId = char.id;
+        ui.draft.subjectId = subject.id;
+        ui.draft.shelfName = char.shelves[0]?.name || '';
+        ui.characterDropdownOpen = false;
+        ui.characterQuery = '';
+        render();
+    });
+    $(document).on(`change${NS}`, '#nw-site-character-image', async function () {
+        const file = this.files?.[0];
+        if (!file || !ui.subjectCreator) return;
+        const editor = ui.subjectCreator;
+        captureDraft();
+        try {
+            const image = await prepareImage(file, 900);
+            if (ui.subjectCreator === editor) { editor.imageDataUrl = image.dataUrl; render(); }
+        } catch (error) { editor.error = String(error.message || error); render(); }
+    });
+    $(document).on(`click${NS}`, '[data-action="refresh-site-characters"]', () => { void refreshSiteCatalogue(true); });
     $(document).on(`click${NS}`, '[data-action="quick-subject"]', () => openInlineSubjectCreator('character', true));
     $(document).on(`click${NS}`, '[data-action="new-subject"]', function () { openInlineSubjectCreator(this.dataset.type, ui.view === 'create'); });
     $(document).on(`click${NS}`, '[data-action="new-tag"]', () => void openTagCreatorPopup('', false));
@@ -1532,9 +1845,10 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="paste-image"]', () => void pasteImageFromClipboard());
     $(document).on(`click${NS}`, '[data-action="remove-image"]', function () { captureDraft(); ui.draft.images = ui.draft.images.filter(image => image.id !== this.dataset.imageId); render(); });
     $(document).on(`click${NS}`, '[data-action="make-cover"]', function () { captureDraft(); const index = ui.draft.images.findIndex(image => image.id === this.dataset.imageId); if (index > 0) ui.draft.images.unshift(ui.draft.images.splice(index, 1)[0]); render(); });
-    $(document).on(`click${NS}`, '[data-action="save-outfit"]', saveOutfit);
+    $(document).on(`click${NS}`, '[data-action="save-outfit"]', () => void saveOutfit());
     $(document).on(`click${NS}`, '[data-action="export-outfit-site"]', function () { void exportSavedOutfitToWebsite(this.dataset.outfitId); });
     $(document).on(`click${NS}`, '[data-action="delete-outfit"]', () => void deleteOutfit());
+    $(document).on(`click${NS}`, '[data-action="delete-saved-outfit"]', function () { void deleteSavedOutfit(this.dataset.outfitId); });
     $(document).on(`click${NS}`, '[data-action="generate-outfit"]', () => void generateFromForm());
     $(document).on(`click${NS}`, '[data-action="save-settings"]', () => void saveSettingsForm());
     $(document).on(`click${NS}`, '[data-action="test-regex"]', () => void testRegex());
@@ -1566,12 +1880,18 @@ function onChatChanged() {
     profileTestController = null;
     siteController?.abort();
     siteController = null;
+    catalogueController?.abort();
+    catalogueController = null;
     ui.websiteLoading = false;
     ui.view = 'gallery';
     ui.subjectFilter = '';
     ui.tagFilters.clear();
     ui.undo = null;
     ui.status = '';
+    ui.sitePickerOpen = false;
+    ui.characterDropdownOpen = false;
+    catalogueController?.abort();
+    adoptLegacyOutfits();
     ui.galleryMode = 'library';
     ui.activeEntries = [];
     ui.activePostKey = null;
@@ -1594,7 +1914,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.6.2 ready');
+        console.log('[NESS Wardrobe] v1.7.0 chat/site bridge ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');
