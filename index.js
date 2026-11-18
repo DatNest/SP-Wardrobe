@@ -664,7 +664,6 @@ function subjectSettingsRow(subject) {
     return `<article class="nw-settings-row" data-subject-id="${escapeHtml(subject.id)}">
         <div class="nw-settings-row-head"><span class="nw-type-badge nw-${subject.type}" style="${colorStyle(subject.color)}"><i class="fa-solid ${subjectIcon(subject.type)}"></i>${subjectTypeLabel(subject.type)}</span><button class="menu_button fa-fw" data-action="delete-subject" aria-label="Удалить" title="Удалить"><i class="fa-solid fa-trash"></i></button></div>
         <div class="nw-settings-grid"><label><span>Имя</span><input class="text_pole" data-subject-field="name" maxlength="120" value="${escapeHtml(subject.name)}"></label><label><span>Тип</span><select class="text_pole" data-subject-field="type"><option value="character" ${subject.type === 'character' ? 'selected' : ''}>Персонаж</option><option value="persona" ${subject.type === 'persona' ? 'selected' : ''}>Персона</option></select></label><label class="nw-color-field"><span>Цвет</span><input type="color" data-subject-field="color" value="${escapeHtml(subject.color)}"></label></div>
-        ${editor.assignToDraft ? `<label><span>Описание персонажа на сайте <small>необязательно</small></span><textarea id="nw-inline-site-description" class="text_pole" rows="3" maxlength="12000" placeholder="Описание, как на сайте">${escapeHtml(editor.description || '')}</textarea></label><label class="nw-site-avatar-upload"><span>Изображение персонажа <small>необязательно</small></span>${editor.imageDataUrl ? `<img src="${escapeHtml(editor.imageDataUrl)}" alt="Предпросмотр" loading="lazy">` : ''}<input id="nw-site-character-image" type="file" accept="image/*" class="text_pole"></label><small>Этот персонаж появится на сайте Wardrobe.</small>` : ''}
         <div class="nw-aliases"><small>Другие имена для поиска в посте</small><div class="nw-alias-chips">${subject.aliases.map(alias => `<button class="menu_button nw-alias-chip nw-tag-pill" style="${colorStyle(subject.color)}" data-action="remove-alias" data-alias="${escapeHtml(alias)}" title="Удалить имя ${escapeHtml(alias)}"><i class="fa-solid fa-user" aria-hidden="true"></i><span>${escapeHtml(alias)}</span><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`).join('')}<input class="text_pole nw-alias-input" placeholder="Введи имя и нажми Enter"></div></div>
     </article>`;
 }
@@ -1914,7 +1913,7 @@ jQuery(async () => {
         bindEvents();
         render();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        console.log('[NESS Wardrobe] v1.7.0 chat/site bridge ready');
+        console.log('[NESS Wardrobe] v1.7.1 settings hotfix ready');
     } catch (error) {
         console.error('[NESS Wardrobe] Failed to initialize:', error);
         notify('Гардероб не загрузился. Подробности — в консоли.', 'error');

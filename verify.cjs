@@ -94,9 +94,9 @@ const siteBridgeSource = read('site_bridge.js');
 const siteTokenSource = read('site_token.js');
 const nessLibraryBridgeSource = read('ness_library_bridge.js');
 
-assert.equal(manifest.version, '1.7.0');
+assert.equal(manifest.version, '1.7.1');
 assert.equal(manifest.auto_update, false);
-assert.match(indexSource, /v1\.7\.0 chat\/site bridge ready/);
+assert.match(indexSource, /v1\.7\.1 settings hotfix ready/);
 assert.equal((indexSource.match(/data-view="(?:gallery|create|settings)"/g) || []).length, 3, 'exactly three primary tabs');
 assert.match(indexSource, /data-mode="write"/);
 assert.match(indexSource, /data-mode="generate"/);
