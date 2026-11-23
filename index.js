@@ -687,19 +687,59 @@ function websiteSettingsPaneHtml() {
     </section>`;
 }
 
+const PROMPT_EDITOR_INFO = [
+    {
+        id: 'scan', title: 'Промпт сканирования', field: 'nw-scan-prompt', key: 'scan', reset: 'reset-scan-prompt',
+        variables: '{{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}',
+        help: 'Первый этап генерации. Запускается, когда ты нажимаешь «Сгенерировать описание» в создании наряда. Анализирует лорбук, доступный контекст мира и два последних поста, чтобы подготовить сведения для следующего промпта. Не запускается при обычном открытии гардероба или применении наряда.',
+    },
+    {
+        id: 'generation', title: 'Промпт генерации', field: 'nw-generation-prompt', key: 'outfit', reset: 'reset-generation-prompt',
+        variables: '{{target}}, {{wishes}}, {{avoid}}, {{scan}}, {{world}}, {{posts}}, {{current_date}}',
+        help: 'Второй этап после сканирования. Запускается той же кнопкой «Сгенерировать описание» и получает результат первого этапа через {{scan}}. Создаёт текст одежды в черновике; наряд сохраняется только после нажатия «Сохранить наряд».',
+    },
+];
+
+function promptEditorHtml(info) {
+    return `<section class="nw-prompt-item">
+        <details class="nw-prompt-details">
+            <summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span>${escapeHtml(info.title)}</span></summary>
+            <div class="nw-prompt-body"><small>Переменные: ${escapeHtml(info.variables)}</small>
+                <textarea id="${info.field}" class="text_pole nw-code-field" rows="12" maxlength="20000">${escapeHtml(settings.prompts[info.key])}</textarea>
+                <button class="menu_button" data-action="${info.reset}" type="button"><i class="fa-solid fa-rotate-left"></i><span>Вернуть стандартный текст</span></button>
+            </div>
+        </details>
+        <button class="menu_button nw-prompt-help-button" type="button" data-action="toggle-prompt-help" data-help="${info.id}" aria-label="Для чего нужен ${escapeHtml(info.title.toLowerCase())}" aria-controls="nw-help-${info.id}" aria-expanded="false">?</button>
+        <p class="nw-prompt-help-text" id="nw-help-${info.id}" hidden>${escapeHtml(info.help)}</p>
+    </section>`;
+}
+
 function settingsViewHtml() {
     const rule = settings.regex;
-    const tab = SETTINGS_TABS.some(item => item.id === ui.settingsTab) ? ui.settingsTab : 'subjects';
+    const tab = SETTINGS_TABS.some(item => item.id === ui.settingsTab) ? ui.settingsTab : 'website';
     const tabs = SETTINGS_TABS.map(item => `<button class="menu_button nw-settings-tab${tab === item.id ? ' active' : ''}" role="tab" aria-selected="${tab === item.id}" data-settings-tab="${item.id}"><i class="fa-solid ${item.icon}" aria-hidden="true"></i><span>${item.label}</span></button>`).join('');
     const panes = {
-        subjects: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Персоны и персонажи</strong><small>Персонаж ◆ — герой или NPC. Персона ● — образ пользователя.</small></div><span class="nw-counter">${settings.subjects.length}</span></div><div class="nw-action-row"><button class="menu_button" data-action="new-subject" data-type="character">+ Персонаж</button><button class="menu_button" data-action="new-subject" data-type="persona">+ Персона</button></div>${inlineSubjectCreatorHtml()}<div class="nw-settings-list">${settings.subjects.map(subjectSettingsRow).join('') || emptyHtml('Пока никого', 'Создай персонажа или персону, чтобы привязывать к ним наряды.')}</div></section>`,
-        tags: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Обычные теги</strong><small>Цветные метки для фильтрации. Цвет не попадает в описание одежды.</small></div><span class="nw-counter">${settings.tags.length}</span></div><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="new-tag"><i class="fa-solid fa-tag"></i><span>Создать тег</span></button></div><div class="nw-settings-list">${settings.tags.map(tagSettingsRow).join('') || emptyHtml('Тегов нет', 'Создай цветные метки для фильтрации галереи.')}</div></section>`,
-        connection: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Подключение к модели</strong><small>Профиль анализирует лорбук и последние два поста, затем создаёт наряд.</small></div><span>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</span></div><label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label><div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div></section>`,
         website: websiteSettingsPaneHtml,
         insertion: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Вставка в пост</strong><small>Проверяется указанное число последних постов, но меняется только самый свежий найденный блок гардероба.</small></div></div><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="5" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов проверить</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><label><span>Шаблон новой строки</span><textarea id="nw-regex-entry-template" class="text_pole nw-code-field" rows="2" maxlength="2000">${escapeHtml(rule.entryTemplate)}</textarea><small>Оставь переменные {{name}} и {{outfit}} — вместо них подставятся имя и описание.</small></label><label><span>Маркер конца гардероба</span><input id="nw-regex-closing-marker" class="text_pole nw-code-field" maxlength="500" value="${escapeHtml(rule.closingMarker)}"></label><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
-        scan: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт сканирования</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-scan-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.scan)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-scan-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
-        generation: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Промпт генерации</strong><small>Доступны {{target}}, {{wishes}}, {{avoid}}, {{scan}}, {{world}}, {{posts}}, {{current_date}}.</small></div></div><textarea id="nw-generation-prompt" class="text_pole nw-code-field" rows="16" maxlength="20000">${escapeHtml(settings.prompts.outfit)}</textarea><div class="nw-action-row"><button class="menu_button" data-action="reset-generation-prompt">Вернуть стандартный текст</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
-        transfer: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Перенос и резервная копия</strong><small>Файл содержит наряды, изображения, теги, персонажей, правило и промпты.</small></div></div><p class="nw-help">Закрепления отдельных чатов не экспортируются, потому что хранятся внутри самих чатов.</p><div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="export"><i class="fa-solid fa-file-export"></i><span>Экспортировать</span></button><label class="menu_button menu_button_icon nw-file-button"><i class="fa-solid fa-file-import"></i><span>Импортировать</span><input id="nw-import-file" type="file" accept="application/json,.json" hidden></label></div></section>`,
+        prompts: () => `<section class="nw-settings-pane nw-prompts-pane" role="tabpanel">
+            <div class="nw-settings-pane-head"><div><strong>Промпты генерации нарядов</strong><small>Открой нужный промпт для редактирования. Нажми ?, чтобы прочитать, когда он используется.</small></div></div>
+            ${PROMPT_EDITOR_INFO.map(promptEditorHtml).join('')}
+            <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить промпты</span></button></div>
+            <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div>
+        </section>`,
+        extra: () => `<section class="nw-settings-pane nw-extra-pane" role="tabpanel">
+            <div class="nw-settings-pane-head"><div><strong>Дополнительные настройки</strong><small>Подключение к модели и резервные копии.</small></div></div>
+            <section class="nw-extra-group" aria-label="Подключение к модели">
+                <div class="nw-settings-pane-head"><div><strong><i class="fa-solid fa-plug" aria-hidden="true"></i> Подключение к модели</strong><small>Профиль используется при генерации наряда.</small></div><span>${profilesLoading ? 'обновляется…' : `${connectionProfiles.length} проф.`}</span></div>
+                <label><span>Профиль подключения</span><select id="nw-connection-profile" class="text_pole">${connectionOptionsHtml()}</select></label>
+                <div class="nw-action-row"><button class="menu_button" data-action="refresh-profiles">Обновить список</button><button class="menu_button" data-action="test-profile">Проверить подключение</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div>
+                <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.connectionStatus)}</div>
+            </section>
+            <section class="nw-extra-group" aria-label="Резервная копия">
+                <div class="nw-settings-pane-head"><div><strong><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Перенос и резервная копия</strong><small>Архив сохраняет наряды, изображения, правила и промпты. Старые внутренние привязки также сохраняются для совместимости.</small></div></div>
+                <div class="nw-action-row"><button class="menu_button menu_button_icon nw-main-action" data-action="export"><i class="fa-solid fa-file-export"></i><span>Экспортировать</span></button><label class="menu_button menu_button_icon nw-file-button"><i class="fa-solid fa-file-import"></i><span>Импортировать</span><input id="nw-import-file" type="file" accept="application/json,.json" hidden></label></div>
+            </section>
+        </section>`,
     };
     return `<div class="nw-settings-shell"><nav class="nw-settings-tabs" role="tablist" aria-label="Разделы настроек">${tabs}</nav><div class="nw-settings-content">${panes[tab]()}</div></div>`;
 }
