@@ -216,7 +216,8 @@ export function normalizeRegexRule(value) {
         }
     }
     if (!/^[gimsu]*$/.test(flags) || new Set(flags).size !== flags.length) {
-        throw new Error('Флаги могут содержать только g, i, m, s, u без повторов.');
+        if (mode === 'regex') throw new Error('Флаги могут содержать только g, i, m, s, u без повторов.');
+        flags = WARDROBE_RULE_DEFAULTS.flags;
     }
     const nameGroup = plainText(source.nameGroup || WARDROBE_RULE_DEFAULTS.nameGroup, 40).trim();
     const outfitGroup = plainText(source.outfitGroup || WARDROBE_RULE_DEFAULTS.outfitGroup, 40).trim();
