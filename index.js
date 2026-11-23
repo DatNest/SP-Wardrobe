@@ -193,7 +193,7 @@ async function refreshSiteCatalogue(force = false) {
     if (ui.siteLoadBusy) return;
     if (!force && ui.siteLoadedAt && currentCatalogueAge() < 5 * 60_000) return;
     if (!settings.website.siteUrl && (!settings.website.githubUser || !settings.website.githubRepo)) {
-        ui.siteLoadError = 'Сначала укажи адрес сайта в Настройки → Библиотека.';
+        ui.siteLoadError = 'Сначала укажи адрес сайта в Настройки → Библиотека персонажей.';
         return;
     }
     catalogueController?.abort();
@@ -759,7 +759,7 @@ function render() {
         if (ui.view === 'create' && !ui.siteLoadedAt && !ui.siteLoadBusy && !ui.siteLoadError) void refreshSiteCatalogue();
         if (ui.view === 'gallery' && ui.galleryMode === 'library') requestAnimationFrame(() => renderGalleryGrid(true));
         if (ui.view === 'gallery' && ui.galleryMode === 'active' && ui.activeNeedsRefresh && !ui.activeLoading) void refreshActiveOutfits();
-        if (ui.view === 'settings' && ui.settingsTab === 'connection' && !profilesLoaded && !profilesLoading) void refreshConnectionProfiles(false);
+        if (ui.view === 'settings' && ui.settingsTab === 'extra' && !profilesLoaded && !profilesLoading) void refreshConnectionProfiles(false);
     }
     if (floating.visible) requestAnimationFrame(applyFloatingButtonPosition);
 }
@@ -857,7 +857,7 @@ async function saveSettingsForm({ silent = false } = {}) {
             if (!silent && rule.pattern) await validateRegexRule(rule);
             changed = JSON.stringify(settings.regex) !== JSON.stringify(rule);
             settings.regex = rule;
-        } else if (ui.settingsTab === 'connection') {
+        } else if (ui.settingsTab === 'extra') {
             const profile = document.getElementById('nw-connection-profile');
             if (profile) {
                 const profileId = profile.value || 'auto';
@@ -875,23 +875,17 @@ async function saveSettingsForm({ silent = false } = {}) {
             settings.website = next;
             const tokenField = document.getElementById('nw-website-token');
             if (tokenField) setWebsiteToken(tokenField.value);
-        } else if (ui.settingsTab === 'scan') {
-            const field = document.getElementById('nw-scan-prompt');
-            if (field) {
-                const prompt = field.value.trim() || DEFAULT_SCAN_PROMPT;
-                changed = settings.prompts.scan !== prompt;
-                settings.prompts.scan = prompt;
-            }
-        } else if (ui.settingsTab === 'generation') {
-            const field = document.getElementById('nw-generation-prompt');
-            if (field) {
-                const prompt = field.value.trim() || DEFAULT_GENERATION_PROMPT;
-                changed = settings.prompts.outfit !== prompt;
-                settings.prompts.outfit = prompt;
-            }
+        } else if (ui.settingsTab === 'prompts') {
+            const scanField = document.getElementById('nw-scan-prompt');
+            const outfitField = document.getElementById('nw-generation-prompt');
+            const scan = scanField?.value.trim() || DEFAULT_SCAN_PROMPT;
+            const outfit = outfitField?.value.trim() || DEFAULT_GENERATION_PROMPT;
+            changed = settings.prompts.scan !== scan || settings.prompts.outfit !== outfit;
+            settings.prompts.scan = scan;
+            settings.prompts.outfit = outfit;
         }
         if (changed) commitSettings();
-        if (ui.settingsTab === 'connection') ui.connectionStatus = 'Настройки сохранены.';
+        if (ui.settingsTab === 'extra') ui.connectionStatus = 'Настройки сохранены.';
         if (ui.settingsTab === 'website') ui.websiteStatus = 'Подключение сохранено.';
         if (!silent && status) status.textContent = 'Настройки сохранены.';
         return true;
@@ -936,7 +930,7 @@ async function exportLibraryAppearanceToWebsite(id) {
     const look = currentNessLibrary().records.find(record => record.id === id);
     if (!look) return notify('Запись больше не найдена в NESS Library. Обнови окно.', 'warning');
     if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) {
-        notify('Сначала заполни GitHub в Настройки → Библиотека.', 'warning');
+        notify('Сначала заполни GitHub в Настройки → Библиотека персонажей.', 'warning');
         return;
     }
     siteController?.abort();
@@ -971,7 +965,7 @@ async function exportSavedOutfitToWebsite(outfitId) {
     if (!outfit || !subject) return notify('Сначала сохрани наряд и выбери, для кого он.', 'warning');
     if (!outfit.images[0]) return notify('Добавь наряду обложку перед отправкой на сайт.', 'warning');
     if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) {
-        notify('Сначала заполни GitHub в Настройки → Библиотека.', 'warning');
+        notify('Сначала заполни GitHub в Настройки → Библиотека персонажей.', 'warning');
         return;
     }
     const suggestedShelf = outfit.shelfName || 'Образы';
@@ -1151,7 +1145,7 @@ async function createInlineSubject() {
     cloudBusy = true;
     try {
         if (editor.assignToDraft) {
-            if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) throw new Error('Укажи GitHub и токен в Настройки → Библиотека.');
+            if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) throw new Error('Укажи GitHub и токен в Настройки → Библиотека персонажей.');
             const created = await createCharacterOnWebsite(websiteRequestConfig(), {
                 id: subject.id, name, description: editor.description, imageDataUrl: editor.imageDataUrl,
             });
@@ -1848,6 +1842,15 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="test-regex"]', () => void testRegex());
     $(document).on(`click${NS}`, '[data-action="refresh-profiles"]', async () => { if (await saveSettingsForm({ silent: true })) await refreshConnectionProfiles(true); });
     $(document).on(`click${NS}`, '[data-action="test-profile"]', () => void testSelectedProfile());
+    $(document).on(`click${NS}`, '[data-action="toggle-prompt-help"]', function (event) {
+        event.preventDefault();
+        const id = this.dataset.help;
+        const panel = document.getElementById(`nw-help-${id}`);
+        if (!panel) return;
+        const expanded = panel.hidden;
+        panel.hidden = !expanded;
+        this.setAttribute('aria-expanded', String(expanded));
+    });
     $(document).on(`click${NS}`, '[data-action="reset-scan-prompt"]', () => { const field = document.getElementById('nw-scan-prompt'); if (field) field.value = DEFAULT_SCAN_PROMPT; });
     $(document).on(`click${NS}`, '[data-action="reset-generation-prompt"]', () => { const field = document.getElementById('nw-generation-prompt'); if (field) field.value = DEFAULT_GENERATION_PROMPT; });
     $(document).on(`click${NS}`, '[data-action="load-website-looks"]', () => void loadWebsiteLooks());
