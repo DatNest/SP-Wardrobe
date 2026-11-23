@@ -21,7 +21,6 @@ import {
     normalizeRegexRule,
     normalizeSettings,
     normalizeSubject,
-    normalizeTag,
     readExport,
     runWardrobeRegex,
     subjectNames,
@@ -66,13 +65,11 @@ let siteController = null;
 let catalogueController = null;
 let cloudBusy = false;
 let settingsRevision = 0;
-let galleryResultCache = { key: '', outfits: [], subjectById: new Map(), tagById: new Map() };
+let galleryResultCache = { key: '', outfits: [], subjectById: new Map() };
 
 const ui = {
     view: 'gallery',
     search: '',
-    subjectFilter: '',
-    tagFilters: new Set(),
     favoriteOnly: false,
     galleryMode: 'library',
     activeEntries: [],
@@ -86,7 +83,6 @@ const ui = {
     settingsTab: 'website',
     draft: null,
     subjectCreator: null,
-    tagSearch: '',
     generator: { target: '', wishes: '', avoid: '' },
     undo: null,
     status: '',
@@ -328,9 +324,6 @@ function findSubject(id) {
     return settings.subjects.find(subject => subject.id === id);
 }
 
-function findTag(id) {
-    return settings.tags.find(tag => tag.id === id);
-}
 
 function findOutfit(id) {
     return chatOutfits().find(outfit => outfit.id === id);
@@ -369,15 +362,6 @@ function colorStyle(color) {
     return `--nw-tag-color:${normalizeColor(color)}`;
 }
 
-function subjectChip(subject, options = {}) {
-    const selected = options.selected ? ' active' : '';
-    const pinned = options.pinned ? '<i class="fa-solid fa-thumbtack nw-pin-mark" aria-hidden="true"></i>' : '';
-    return `<button class="menu_button nw-chip nw-subject-chip nw-${subject.type}${selected}" style="${colorStyle(subject.color)}" data-action="filter-subject" data-subject-id="${escapeHtml(subject.id)}" title="${escapeHtml(subjectTypeLabel(subject.type))}: ${escapeHtml(subject.name)}"><i class="fa-solid ${subjectIcon(subject.type)}" aria-hidden="true"></i><span>${escapeHtml(subject.name)}</span>${pinned}</button>`;
-}
-
-function tagChip(tag, selected = false, action = 'filter-tag') {
-    return `<button class="menu_button nw-chip nw-tag-pill nw-tag-chip${selected ? ' active' : ''}" style="${colorStyle(tag.color)}" data-action="${action}" data-tag-id="${escapeHtml(tag.id)}"><i class="fa-solid fa-tag" aria-hidden="true"></i><span>${escapeHtml(tag.name)}</span></button>`;
-}
 
 function panelHtml() {
     return `<div id="nw-panel" class="nw-panel" aria-label="NESS Wardrobe">
@@ -400,7 +384,7 @@ function settingsDrawerHtml() {
         <div class="inline-drawer-toggle inline-drawer-header"><b>👗 NESS Wardrobe</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
         <div class="inline-drawer-content"><div class="nw-drawer-body">
             <label class="checkbox_label"><input id="nw-show-floating" type="checkbox"><span>Показывать плавающую кнопку на этом устройстве</span></label>
-            <small>Наряды доступны только в чате создания или импорта. Теги и настройки остаются общими.</small>
+            <small>Наряды привязаны к чатам; подключение и промпты остаются общими.</small>
             <button class="menu_button menu_button_icon" data-action="open"><i class="fa-solid fa-shirt"></i><span>Открыть гардероб</span></button>
         </div></div>
     </div></div>`;
@@ -676,7 +660,7 @@ function websiteSettingsPaneHtml() {
     const websiteEmpty = ui.websiteLoaded
         ? emptyHtml('Отдельных внешностей на сайте нет', 'Все внешности сайта уже совпадают с NESS Library.')
         : emptyHtml('Сайт ещё не загружен', 'Сохрани адрес и нажми «Обновить данные сайта».');
-    return `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>NESS Library и сайт</strong><small>Основной источник внешности — ваша общая библиотека. Сайт хранит опубликованные копии и отдельные записи.</small></div>${ui.websiteLoading ? '<span>загрузка…</span>' : ''}</div>
+    return `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Библиотека персонажей</strong><small>Основной источник внешности — ваша общая библиотека. Сайт хранит опубликованные копии и отдельные записи.</small></div>${ui.websiteLoading ? '<span>загрузка…</span>' : ''}</div>
         <label><span>Адрес сайта</span><input id="nw-website-url" class="text_pole" type="url" inputmode="url" placeholder="https://логин.github.io/wardrobe/" value="${escapeHtml(website.siteUrl)}"><small>Для чтения внешностей достаточно этого адреса.</small></label>
         <div class="nw-settings-grid"><label><span>Логин GitHub</span><input id="nw-website-user" class="text_pole" autocomplete="off" value="${escapeHtml(website.githubUser)}"></label><label><span>Репозиторий</span><input id="nw-website-repo" class="text_pole" autocomplete="off" placeholder="wardrobe" value="${escapeHtml(website.githubRepo)}"></label></div>
         <label><span>Токен GitHub</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="off" placeholder="Нужен только для отправки нарядов" value="${escapeHtml(getWebsiteToken())}"><small>Хранится только в этом браузере и не попадает в резервную копию NESS Wardrobe.</small></label>
@@ -1166,66 +1150,6 @@ async function createInlineSubject() {
     finally { cloudBusy = false; }
 }
 
-async function openTagCreatorPopup(prefill = '', assignToDraft = false) {
-    captureDraft();
-    const suggestedName = normalizeName(prefill);
-    const existing = settings.tags.find(tag => comparableName(tag.name) === comparableName(suggestedName));
-    if (existing && assignToDraft && ui.draft) {
-        if (!ui.draft.tagIds.includes(existing.id)) ui.draft.tagIds.push(existing.id);
-        ui.tagSearch = '';
-        render();
-        return;
-    }
-    const colorFieldId = `nw-tag-popup-color-${uid('field').replace(/[^a-zA-Z0-9_-]/g, '')}`;
-    const revision = operationRevision;
-    const popup = new Popup(
-        '<div class="nw-tag-popup-copy"><h3><i class="fa-solid fa-tag"></i> Новый тег</h3><strong>Название тега</strong><small>Название уже заполнено из поиска. Выбери цвет и подтверди создание.</small></div>',
-        POPUP_TYPE.INPUT,
-        suggestedName,
-        {
-            wide: false,
-            okButton: assignToDraft ? 'Создать и выбрать' : 'Создать',
-            cancelButton: 'Отмена',
-            customInputs: [{ id: colorFieldId, label: 'Цвет тега', type: 'color', defaultState: '#8a7aa5' }],
-        },
-    );
-    const result = await popup.show();
-    if (typeof result !== 'string' || revision !== operationRevision) return;
-    const name = normalizeName(result);
-    if (!name) {
-        notify('Тег не создан: введи название.', 'warning');
-        return;
-    }
-    const duplicate = settings.tags.find(tag => comparableName(tag.name) === comparableName(name));
-    if (duplicate) {
-        if (assignToDraft && ui.draft && !ui.draft.tagIds.includes(duplicate.id)) ui.draft.tagIds.push(duplicate.id);
-        ui.tagSearch = '';
-        render();
-        notify(`Тег «${duplicate.name}» уже существует и выбран.`, 'success');
-        return;
-    }
-    const color = normalizeColor(popup.inputResults?.get(colorFieldId), '#8a7aa5');
-    const tag = normalizeTag({ id: uid('tag'), name, color });
-    settings.tags.push(tag);
-    if (assignToDraft && ui.draft && !ui.draft.tagIds.includes(tag.id)) ui.draft.tagIds.push(tag.id);
-    ui.tagSearch = '';
-    commitSettings();
-    render();
-    notify(`Тег «${tag.name}» создан${assignToDraft ? ' и выбран' : ''}.`, 'success');
-}
-
-async function managePins() {
-    const state = getChatState(true);
-    if (!state) {
-        notify('Сначала открой чат.', 'warning');
-        return;
-    }
-    const pinned = new Set(state.pinnedSubjectIds);
-    const rows = settings.subjects.map(subject => `<label class="checkbox_label nw-pin-row" style="${colorStyle(subject.color)}"><input type="checkbox" data-pin-subject="${escapeHtml(subject.id)}" ${pinned.has(subject.id) ? 'checked' : ''}><span><i class="fa-solid ${subjectIcon(subject.type)}"></i><b>${escapeHtml(subject.name)}</b><small>${subjectTypeLabel(subject.type)}</small></span></label>`).join('');
-    const popup = new Popup(`<div class="nw-pin-dialog"><h3>Закрепить к этому чату</h3><small>Закрепление влияет на быстрый выбор и хранится только в текущем чате.</small><div class="nw-pin-list">${rows || emptyHtml('Список пуст', 'Сначала создай персону или персонажа в настройках.')}</div></div>`, POPUP_TYPE.DISPLAY, '', { wide: false, leftAlign: true });
-    await popup.show();
-    if (managerPopup && ui.view === 'gallery') render();
-}
 
 function cancelImageOperation() {
     imageRevision++;
@@ -1553,7 +1477,7 @@ async function importSettings(file) {
     try {
         if (file.size > 25 * 1024 * 1024) throw new Error('Файл больше 25 МБ. Выбери резервную копию гардероба.');
         const imported = readExport(await file.text());
-        const confirmed = await Popup.show.confirm('Заменить библиотеку?', `Будет загружено: ${imported.outfits.length} нарядов, ${imported.subjects.length} персон и персонажей, ${imported.tags.length} тегов. Текущая библиотека будет заменена.`, { okButton: 'Импортировать', cancelButton: 'Отмена' });
+        const confirmed = await Popup.show.confirm('Заменить библиотеку?', `Будет загружено: ${imported.outfits.length} нарядов и связанные настройки. Старые внутренние привязки сохранятся. Текущая библиотека будет заменена.`, { okButton: 'Импортировать', cancelButton: 'Отмена' });
         if (!confirmed) return;
         settings = imported;
         adoptLegacyOutfits();
@@ -1561,8 +1485,6 @@ async function importSettings(file) {
         const state = getChatState(false);
         if (state) saveChatState();
         ui.draft = null;
-        ui.subjectFilter = '';
-        ui.tagFilters.clear();
         render();
         notify('Библиотека импортирована.', 'success');
     } catch (error) {
@@ -1570,33 +1492,6 @@ async function importSettings(file) {
     }
 }
 
-function removeSubject(subjectId) {
-    const subject = findSubject(subjectId);
-    if (!subject) return;
-    const used = settings.outfits.filter(outfit => outfit.subjectId === subjectId).length;
-    Popup.show.confirm('Удалить?', used ? `«${escapeHtml(subject.name)}» привязан(а) к ${used} нарядам. Наряды останутся без привязки.` : `Удалить «${escapeHtml(subject.name)}»?`, { okButton: 'Удалить', cancelButton: 'Отмена' }).then(confirmed => {
-        if (!confirmed) return;
-        settings.subjects = settings.subjects.filter(item => item.id !== subjectId);
-        for (const outfit of settings.outfits) if (outfit.subjectId === subjectId) outfit.subjectId = '';
-        const state = getChatState(false);
-        if (state) { state.pinnedSubjectIds = state.pinnedSubjectIds.filter(id => id !== subjectId); saveChatState(); }
-        commitSettings();
-        render();
-    });
-}
-
-function removeTag(tagId) {
-    const tag = findTag(tagId);
-    if (!tag) return;
-    Popup.show.confirm('Удалить тег?', `Тег «${escapeHtml(tag.name)}» будет снят со всех нарядов.`, { okButton: 'Удалить', cancelButton: 'Отмена' }).then(confirmed => {
-        if (!confirmed) return;
-        settings.tags = settings.tags.filter(item => item.id !== tagId);
-        for (const outfit of settings.outfits) outfit.tagIds = outfit.tagIds.filter(id => id !== tagId);
-        ui.tagFilters.delete(tagId);
-        commitSettings();
-        render();
-    });
-}
 
 function bindFloatingButton() {
     const button = document.getElementById('nw-mini');
@@ -1693,7 +1588,6 @@ function bindEvents() {
         ui.sitePickerOpen = false;
         ui.characterDropdownOpen = false;
         ui.subjectCreator = null;
-        ui.tagSearch = '';
         ui.view = nextView;
         render();
     });
@@ -1712,27 +1606,14 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="save-active-outfit"]', () => void saveActiveOutfit());
     $(document).on(`click${NS}`, '[data-action="delete-active-outfit"]', function () { void deleteActiveOutfit(Math.max(0, Number(this.dataset.activeIndex) || 0)); });
     $(document).on(`click${NS}`, '[data-action="save-active-to-library"]', saveActiveToLibrary);
-    $(document).on(`click${NS}`, '[data-action="filter-subject"]', function () { ui.subjectFilter = ui.subjectFilter === this.dataset.subjectId ? '' : this.dataset.subjectId; render(); });
-    $(document).on(`click${NS}`, '[data-action="clear-subject"]', () => { ui.subjectFilter = ''; render(); });
-    $(document).on(`click${NS}`, '[data-action="filter-tag"]', function () { const id = this.dataset.tagId; ui.tagFilters.has(id) ? ui.tagFilters.delete(id) : ui.tagFilters.add(id); render(); });
-    $(document).on(`click${NS}`, '[data-action="clear-tags"]', () => { ui.tagFilters.clear(); render(); });
     $(document).on(`click${NS}`, '[data-action="favorite-filter"]', () => { ui.favoriteOnly = !ui.favoriteOnly; render(); });
     $(document).on(`click${NS}`, '[data-action="load-more"]', () => renderGalleryGrid(false));
-    $(document).on(`click${NS}`, '[data-action="manage-pins"]', managePins);
-    $(document).on(`change${NS}`, '[data-pin-subject]', function () {
-        const state = getChatState(true);
-        if (!state) return;
-        const ids = new Set(state.pinnedSubjectIds);
-        this.checked ? ids.add(this.dataset.pinSubject) : ids.delete(this.dataset.pinSubject);
-        state.pinnedSubjectIds = [...ids];
-        saveChatState();
-    });
     $(document).on(`click${NS}`, '[data-action="apply-outfit"]', function () { void applyOutfit(this.dataset.outfitId); });
     $(document).on(`click${NS}`, '[data-action="undo"]', () => void undoApply());
     $(document).on(`click${NS}`, '[data-action="toggle-favorite"]', function () { const outfit = findOutfit(this.dataset.outfitId); if (!outfit) return; outfit.favorite = !outfit.favorite; outfit.updatedAt = new Date().toISOString(); commitSettings(); render(); });
-    $(document).on(`click${NS}`, '[data-action="edit-outfit"]', function () { const outfit = findOutfit(this.dataset.outfitId); if (!outfit) return; ui.draft = clone(outfit); ui.subjectCreator = null; ui.tagSearch = ''; ui.createMode = 'write'; ui.view = 'create'; render(); });
+    $(document).on(`click${NS}`, '[data-action="edit-outfit"]', function () { const outfit = findOutfit(this.dataset.outfitId); if (!outfit) return; ui.draft = clone(outfit); ui.subjectCreator = null; ui.createMode = 'write'; ui.view = 'create'; render(); });
     $(document).on(`click${NS}`, '[data-action="create-mode"]', function () { captureDraft(); operationRevision++; generationController?.abort(); generationController = null; ui.createMode = this.dataset.mode === 'generate' ? 'generate' : 'write'; render(); });
-    $(document).on(`click${NS}`, '[data-action="reset-draft"]', () => { captureDraft(); cancelImageOperation(); ui.draft = null; ui.subjectCreator = null; ui.tagSearch = ''; ui.generator = { target: '', wishes: '', avoid: '' }; render(); });
+    $(document).on(`click${NS}`, '[data-action="reset-draft"]', () => { captureDraft(); cancelImageOperation(); ui.draft = null; ui.subjectCreator = null; ui.generator = { target: '', wishes: '', avoid: '' }; render(); });
     $(document).on(`click${NS}`, '[data-settings-tab]', async function () {
         const nextTab = this.dataset.settingsTab;
         if (!SETTINGS_TABS.some(tab => tab.id === nextTab) || nextTab === ui.settingsTab) return;
@@ -1803,31 +1684,10 @@ function bindEvents() {
     });
     $(document).on(`click${NS}`, '[data-action="refresh-site-characters"]', () => { void refreshSiteCatalogue(true); });
     $(document).on(`click${NS}`, '[data-action="quick-subject"]', () => openInlineSubjectCreator('character', true));
-    $(document).on(`click${NS}`, '[data-action="new-subject"]', function () { openInlineSubjectCreator(this.dataset.type, ui.view === 'create'); });
-    $(document).on(`click${NS}`, '[data-action="new-tag"]', () => void openTagCreatorPopup('', false));
-    $(document).on(`click${NS}`, '[data-action="new-draft-tag"]', () => void openTagCreatorPopup(ui.tagSearch, true));
     $(document).on(`click${NS}`, '[data-action="cancel-inline-subject"]', () => { captureDraft(); ui.subjectCreator = null; render(); });
     $(document).on(`click${NS}`, '[data-action="create-inline-subject"]', createInlineSubject);
     $(document).on(`keydown${NS}`, '#nw-inline-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); captureDraft(); const alias = normalizeName(this.value); const editor = ui.subjectCreator; if (!editor || !alias || editor.aliases.some(item => comparableName(item) === comparableName(alias))) return; editor.aliases.push(alias); render(); });
     $(document).on(`click${NS}`, '[data-action="remove-inline-alias"]', function () { captureDraft(); if (!ui.subjectCreator) return; ui.subjectCreator.aliases = ui.subjectCreator.aliases.filter(alias => alias !== this.dataset.alias); render(); });
-    $(document).on(`input${NS}`, '#nw-tag-search', function () { updateDraftTagResults(this.value); });
-    $(document).on(`keydown${NS}`, '#nw-tag-search', function (event) {
-        if (event.key !== 'Enter') return;
-        event.preventDefault();
-        const name = normalizeName(this.value);
-        if (!name) return;
-        captureDraft();
-        const existing = settings.tags.find(tag => comparableName(tag.name) === comparableName(name));
-        if (existing) {
-            if (!ui.draft.tagIds.includes(existing.id)) ui.draft.tagIds.push(existing.id);
-            ui.tagSearch = '';
-            render();
-            requestAnimationFrame(() => document.getElementById('nw-tag-search')?.focus());
-            return;
-        }
-        void openTagCreatorPopup(name, true);
-    });
-    $(document).on(`click${NS}`, '[data-action="draft-tag"]', function () { captureDraft(); const id = this.dataset.tagId; ui.draft.tagIds.includes(id) ? ui.draft.tagIds = ui.draft.tagIds.filter(item => item !== id) : ui.draft.tagIds.push(id); ui.tagSearch = ''; render(); requestAnimationFrame(() => document.getElementById('nw-tag-search')?.focus()); });
     $(document).on(`change${NS}`, '#nw-image-files', function () { const files = [...(this.files || [])]; this.value = ''; void handleImageFiles(files); });
     $(document).on(`click${NS}`, '[data-action="add-image-url"]', () => void openImageUrlPopup());
     $(document).on(`click${NS}`, '[data-action="paste-image"]', () => void pasteImageFromClipboard());
@@ -1858,12 +1718,6 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="toggle-website-only"]', () => { ui.websiteOnlyOpen = !ui.websiteOnlyOpen; render(); });
     $(document).on(`click${NS}`, '[data-action="load-more-website-looks"]', () => { ui.websiteLooksOffset += WEBSITE_LOOKS_MORE; render(); });
     $(document).on(`click${NS}`, '[data-action="export-library-look-site"]', function () { void exportLibraryAppearanceToWebsite(this.dataset.lookId); });
-    $(document).on(`change${NS}`, '[data-subject-field]', function () { const row = this.closest('[data-subject-id]'); const subject = findSubject(row?.dataset.subjectId); if (!subject) return; const field = this.dataset.subjectField; if (field === 'name') { subject.name = normalizeName(this.value) || subject.name; this.value = subject.name; } if (field === 'type') subject.type = this.value === 'persona' ? 'persona' : 'character'; if (field === 'color') subject.color = normalizeColor(this.value, subject.color); commitSettings(); });
-    $(document).on(`keydown${NS}`, '.nw-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); const alias = normalizeName(this.value); if (!subject || !alias || comparableName(alias) === comparableName(subject.name) || subject.aliases.some(item => comparableName(item) === comparableName(alias))) return; subject.aliases.push(alias); commitSettings(); render(); });
-    $(document).on(`click${NS}`, '[data-action="remove-alias"]', function () { const subject = findSubject(this.closest('[data-subject-id]')?.dataset.subjectId); if (!subject) return; subject.aliases = subject.aliases.filter(alias => alias !== this.dataset.alias); commitSettings(); render(); });
-    $(document).on(`click${NS}`, '[data-action="delete-subject"]', function () { removeSubject(this.closest('[data-subject-id]')?.dataset.subjectId); });
-    $(document).on(`change${NS}`, '[data-tag-field]', function () { const tag = findTag(this.closest('[data-tag-id]')?.dataset.tagId); if (!tag) return; if (this.dataset.tagField === 'name') { tag.name = normalizeName(this.value) || tag.name; this.value = tag.name; } else tag.color = normalizeColor(this.value, tag.color); commitSettings(); });
-    $(document).on(`click${NS}`, '[data-action="delete-tag"]', function () { removeTag(this.closest('[data-tag-id]')?.dataset.tagId); });
     $(document).on(`click${NS}`, '[data-action="export"]', exportSettings);
     $(document).on(`change${NS}`, '#nw-import-file', function () { const file = this.files?.[0]; this.value = ''; void importSettings(file); });
 }
