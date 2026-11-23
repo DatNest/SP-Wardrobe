@@ -1094,7 +1094,6 @@ function saveActiveToLibrary() {
     ui.draft.description = document.getElementById('nw-active-outfit-description')?.value.trim() || selected.outfit;
     ui.createMode = 'write';
     ui.subjectCreator = null;
-    ui.tagSearch = '';
     ui.view = 'create';
     render();
 }
@@ -1735,8 +1734,6 @@ function onChatChanged() {
     catalogueController = null;
     ui.websiteLoading = false;
     ui.view = 'gallery';
-    ui.subjectFilter = '';
-    ui.tagFilters.clear();
     ui.undo = null;
     ui.status = '';
     ui.sitePickerOpen = false;
@@ -1752,7 +1749,6 @@ function onChatChanged() {
     ui.activeStatus = '';
     ui.draft = null;
     ui.subjectCreator = null;
-    ui.tagSearch = '';
     render();
 }
 
