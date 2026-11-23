@@ -528,3 +528,127 @@
         animation-duration: .01ms !important;
     }
 }
+
+/* Version 1.7.3 — concise settings, touch-friendly collapsible prompt editors. */
+.nw-prompts-pane { align-content: start; }
+
+.nw-prompt-item {
+    position: relative;
+    min-width: 0;
+    display: grid;
+    border: 1px solid color-mix(in srgb, var(--nw-border) 75%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--nw-surface) 85%, transparent);
+    overflow: hidden;
+}
+
+.nw-prompt-details { min-width: 0; }
+.nw-prompt-details > summary {
+    min-width: 0;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 53px 9px 12px;
+    cursor: pointer;
+    font-weight: 650;
+    list-style: none;
+    user-select: none;
+}
+.nw-prompt-details > summary::-webkit-details-marker { display: none; }
+.nw-prompt-details > summary > span { min-width: 0; overflow-wrap: anywhere; }
+.nw-prompt-details > summary .fa-chevron-right {
+    flex: none;
+    font-size: .84em;
+    color: var(--nw-accent);
+    transition: transform 140ms ease;
+}
+.nw-prompt-details[open] > summary .fa-chevron-right { transform: rotate(90deg); }
+.nw-prompt-details[open] > summary { border-bottom: 1px solid color-mix(in srgb, var(--nw-border) 45%, transparent); }
+.nw-prompt-details > summary:focus-visible { outline: 2px solid var(--nw-accent); outline-offset: -2px; }
+.nw-prompt-help-button.menu_button {
+    position: absolute;
+    top: 6px;
+    right: 7px;
+    z-index: 2;
+    width: 30px !important;
+    min-width: 30px !important;
+    height: 30px;
+    min-height: 30px !important;
+    padding: 0 !important;
+    margin: 0;
+    border: 1px solid var(--nw-border);
+    border-radius: 50%;
+    font-size: .95em;
+    font-weight: 700;
+}
+.nw-prompt-help-button[aria-expanded="true"] { border-color: var(--nw-accent); }
+
+.nw-prompt-body {
+    min-width: 0;
+    display: grid;
+    align-items: start;
+    gap: 8px;
+    padding: 10px;
+}
+.nw-prompt-body > small {
+    font-size: .82em;
+    color: var(--nw-muted);
+    overflow-wrap: anywhere;
+}
+.nw-prompt-body > textarea {
+    width: 100%;
+    min-width: 0;
+    min-height: 180px;
+    resize: vertical;
+}
+.nw-prompt-body > .menu_button {
+    justify-self: start;
+    min-height: 35px;
+    padding: 6px 9px;
+    white-space: normal;
+    text-align: left;
+}
+.nw-prompt-help-text {
+    margin: 0;
+    padding: 10px 12px;
+    border-top: 1px solid color-mix(in srgb, var(--nw-border) 50%, transparent);
+    background: color-mix(in srgb, var(--nw-accent) 9%, var(--nw-surface));
+    font-size: .9em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.nw-prompt-help-text[hidden] { display: none !important; }
+
+.nw-extra-pane { gap: 10px; align-content: start; }
+.nw-extra-group {
+    min-width: 0;
+    display: grid;
+    gap: 9px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--nw-border) 75%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--nw-surface) 85%, transparent);
+}
+.nw-extra-group .nw-settings-pane-head { padding-bottom: 6px; }
+.nw-extra-group .nw-settings-pane-head > span { font-size: .84em; }
+.nw-extra-group > label { min-width: 0; display: grid; gap: 5px; }
+.nw-extra-group > label > .text_pole { width: 100%; min-width: 0; }
+.nw-extra-group .nw-action-row { justify-content: flex-start; }
+
+@media (max-width: 650px) {
+    .nw-prompts-pane .nw-settings-pane-head small { display: block; }
+    .nw-settings-tabs { gap: 4px; }
+    .nw-settings-tab.menu_button { min-height: 37px; padding: 6px 9px; font-size: 12px; }
+    .nw-prompt-details > summary { min-height: 43px; padding: 9px 46px 9px 9px; }
+    .nw-prompt-body { padding: 9px; }
+    .nw-prompt-body > textarea { min-height: 160px; }
+    .nw-extra-group { padding: 9px; }
+    .nw-extra-group .nw-action-row > .menu_button,
+    .nw-extra-group .nw-action-row > .nw-file-button {
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
+        white-space: normal !important;
+        text-align: center;
+    }
+}
