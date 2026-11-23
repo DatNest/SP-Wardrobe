@@ -30,7 +30,7 @@ import {
 import { generateOutfit, listConnectionProfiles, testConnectionProfile } from './generation.js';
 import { imageFileFromUrl, prepareImage } from './images.js';
 import { createCharacterOnWebsite, exportLibraryLookToWebsite, exportOutfitToWebsite, loadWebsiteData, websiteCatalogue, websiteLooks } from './site_bridge.js';
-import { getWebsiteToken, setWebsiteToken } from './site_token.js';
+import { getWebsiteToken, setWebsiteToken, clearWebsiteToken } from './site_token.js';
 import { readNessLibrary, splitWebsiteLooks } from './ness_library_bridge.js';
 
 const GALLERY_FIRST = 24;
@@ -179,7 +179,7 @@ function siteImageUrl(raw) {
         if (/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(raw)) return raw;
         const base = settings.website.siteUrl || `https://${settings.website.githubUser}.github.io/${settings.website.githubRepo}/`;
         const url = new URL(raw, base);
-        return ['https:', 'http:'].includes(url.protocol) ? url.href : '';
+        return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) ? url.href : '';
     } catch { return ''; }
 }
 
@@ -222,7 +222,7 @@ function characterOptionsHtml(query = ui.characterQuery) {
 function pickerCharactersHtml(query = ui.sitePickerQuery) {
     const needle = comparableName(query);
     return ui.siteCharacters.filter(char => !needle || comparableName(char.name).includes(needle))
-        .map(char => `<button class="menu_button nw-picker-character" data-action="site-picker-character" data-character-id="${escapeHtml(char.id)}">${char.img && siteImageUrl(char.img) ? `<img src="${escapeHtml(siteImageUrl(char.img))}" alt="" loading="lazy">` : '<i class="fa-solid fa-user"></i>'}<span>${escapeHtml(char.name)}</span><small>${char.shelves.reduce((n, shelf) => n + shelf.items.length, 0)} нарядов</small></button>`).join('') || '<small>Персонажи не найдены.</small>';
+        .map(char => `<button class="menu_button nw-picker-character" data-action="site-picker-character" data-character-id="${escapeHtml(char.id)}">${char.img && siteImageUrl(char.img) ? `<img src="${escapeHtml(siteImageUrl(char.img))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<i class="fa-solid fa-user"></i>'}<span>${escapeHtml(char.name)}</span><small>${char.shelves.reduce((n, shelf) => n + shelf.items.length, 0)} нарядов</small></button>`).join('') || '<small>Персонажи не найдены.</small>';
 }
 
 function pickerItemsHtml(query = ui.sitePickerQuery) {
@@ -233,7 +233,7 @@ function pickerItemsHtml(query = ui.sitePickerQuery) {
     const matches = shelves.flatMap(shelf => shelf.items.map(item => ({ ...item, shelf })));
     const filtered = matches.filter(item => !needle || comparableName(item.desc).includes(needle));
     const limited = filtered.slice(0, 80);
-    const cards = limited.map(item => `<article class="nw-site-picker-item">${item.img && siteImageUrl(item.img) ? `<img src="${escapeHtml(siteImageUrl(item.img))}" alt="" loading="lazy">` : '<span class="nw-site-item-placeholder"><i class="fa-solid fa-shirt"></i></span>'}<div><small>${escapeHtml(item.shelf.name)}</small><p>${escapeHtml(item.desc)}</p><button class="menu_button menu_button_icon nw-main-action" data-action="site-picker-import" data-item-id="${escapeHtml(item.id)}" data-shelf-id="${escapeHtml(item.shelf.id)}"><i class="fa-solid fa-cloud-arrow-down"></i><span>${ui.sitePickerTarget === 'active' ? 'Заменить в посте' : 'Добавить в этот чат'}</span></button></div></article>`).join('');
+    const cards = limited.map(item => `<article class="nw-site-picker-item">${item.img && siteImageUrl(item.img) ? `<img src="${escapeHtml(siteImageUrl(item.img))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<span class="nw-site-item-placeholder"><i class="fa-solid fa-shirt"></i></span>'}<div><small>${escapeHtml(item.shelf.name)}</small><p>${escapeHtml(item.desc)}</p><button class="menu_button menu_button_icon nw-main-action" data-action="site-picker-import" data-item-id="${escapeHtml(item.id)}" data-shelf-id="${escapeHtml(item.shelf.id)}"><i class="fa-solid fa-cloud-arrow-down"></i><span>${ui.sitePickerTarget === 'active' ? 'Заменить в посте' : 'Добавить в этот чат'}</span></button></div></article>`).join('');
     return (filtered.length > limited.length ? `<small>Показаны первые ${limited.length} из ${filtered.length}. Уточни поиск, чтобы увидеть остальные.</small>` : '') + (cards || '<small>Нарядов по запросу не найдено.</small>');
 }
 
@@ -561,7 +561,7 @@ function inlineSubjectCreatorHtml() {
     if (!editor) return '';
     return `<section class="settingsSectionWrap nw-inline-creator" aria-label="Создание персоны или персонажа">
         <div class="nw-inline-creator-head"><div><small>${editor.assignToDraft ? 'Новая привязка для наряда' : 'Новая запись библиотеки'}</small><strong>Добавить персону или персонажа</strong></div><button class="menu_button fa-fw" data-action="cancel-inline-subject" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="nw-settings-grid"><label><span>Имя</span><input id="nw-inline-subject-name" class="text_pole" maxlength="120" placeholder="Например: Зуко" value="${escapeHtml(editor.name)}"></label><label><span>Кто это</span><select id="nw-inline-subject-type" class="text_pole"><option value="character" ${editor.type === 'character' ? 'selected' : ''}>Персонаж или NPC ◆</option><option value="persona" ${editor.type === 'persona' ? 'selected' : ''}>Персона пользователя ●</option></select></label><label class="nw-color-field"><span>Цвет метки</span><input id="nw-inline-subject-color" type="color" value="${escapeHtml(editor.color)}"></label></div>
+        <div class="nw-settings-grid"><label><span>Имя</span><input id="nw-inline-subject-name" class="text_pole" maxlength="120" placeholder="Например: Алекс" value="${escapeHtml(editor.name)}"></label><label><span>Кто это</span><select id="nw-inline-subject-type" class="text_pole"><option value="character" ${editor.type === 'character' ? 'selected' : ''}>Персонаж или NPC ◆</option><option value="persona" ${editor.type === 'persona' ? 'selected' : ''}>Персона пользователя ●</option></select></label><label class="nw-color-field"><span>Цвет метки</span><input id="nw-inline-subject-color" type="color" value="${escapeHtml(editor.color)}"></label></div>
         ${editor.assignToDraft ? `<label><span>Описание персонажа на сайте <small>необязательно</small></span><textarea id="nw-inline-site-description" class="text_pole" rows="3" maxlength="12000" placeholder="Описание, как на сайте">${escapeHtml(editor.description || '')}</textarea></label><label class="nw-site-avatar-upload"><span>Изображение персонажа <small>необязательно</small></span>${editor.imageDataUrl ? `<img src="${escapeHtml(editor.imageDataUrl)}" alt="Предпросмотр" loading="lazy">` : ''}<input id="nw-site-character-image" type="file" accept="image/*" class="text_pole"></label><small>Этот персонаж появится на сайте Wardrobe.</small>` : ''}
         <div class="nw-aliases"><small>Другие имена <span>необязательно</span></small><div class="nw-alias-chips">${editor.aliases.map(alias => `<button class="menu_button nw-alias-chip nw-tag-pill" style="${colorStyle(editor.color)}" data-action="remove-inline-alias" data-alias="${escapeHtml(alias)}" title="Удалить имя ${escapeHtml(alias)}"><i class="fa-solid fa-user" aria-hidden="true"></i><span>${escapeHtml(alias)}</span><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`).join('')}<input id="nw-inline-alias-input" class="text_pole nw-alias-input" placeholder="Введи имя и нажми Enter"></div></div>
         <div class="nw-action-row"><button class="menu_button menu_button_icon" data-action="create-inline-subject"><i class="fa-solid fa-plus"></i><span>${editor.assignToDraft ? 'Добавить и выбрать' : 'Создать'}</span></button><button class="menu_button" data-action="cancel-inline-subject">Отмена</button></div>
@@ -663,7 +663,8 @@ function websiteSettingsPaneHtml() {
     return `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Библиотека персонажей</strong><small>Основной источник внешности — ваша общая библиотека. Сайт хранит опубликованные копии и отдельные записи.</small></div>${ui.websiteLoading ? '<span>загрузка…</span>' : ''}</div>
         <label><span>Адрес сайта</span><input id="nw-website-url" class="text_pole" type="url" inputmode="url" placeholder="https://логин.github.io/wardrobe/" value="${escapeHtml(website.siteUrl)}"><small>Для чтения внешностей достаточно этого адреса.</small></label>
         <div class="nw-settings-grid"><label><span>Логин GitHub</span><input id="nw-website-user" class="text_pole" autocomplete="off" value="${escapeHtml(website.githubUser)}"></label><label><span>Репозиторий</span><input id="nw-website-repo" class="text_pole" autocomplete="off" placeholder="wardrobe" value="${escapeHtml(website.githubRepo)}"></label></div>
-        <label><span>Токен GitHub</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="off" placeholder="Нужен только для отправки нарядов" value="${escapeHtml(getWebsiteToken())}"><small>Хранится только в этом браузере и не попадает в резервную копию NESS Wardrobe.</small></label>
+        <label><span>Токен GitHub (только на время открытой вкладки)</span><input id="nw-website-token" class="text_pole" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="${getWebsiteToken() ? 'Токен действует в этой вкладке' : 'Введи fine-grained токен для GitHub'}"><small>Токен хранится только в оперативной памяти вкладки. После перезагрузки SillyTavern его понадобится ввести снова. Прежний токен из localStorage автоматически удаляется.</small></label>
+        <div class="nw-token-controls"><span class="nw-token-indicator" role="status">${getWebsiteToken() ? 'Токен активен до перезагрузки' : 'Токен не введён'}</span><button class="menu_button" type="button" data-action="forget-website-token" ${getWebsiteToken() ? '' : 'disabled'}><i class="fa-solid fa-key"></i><span>Забыть токен</span></button></div>
         <div class="nw-action-row"><button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить подключение</span></button><button class="menu_button menu_button_icon" data-action="load-website-looks"><i class="fa-solid fa-rotate"></i><span>Обновить данные сайта</span></button></div>
         <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.websiteStatus)}</div>
         <section class="nw-site-looks nw-library-primary"><div class="nw-settings-pane-head"><div><strong>Из NESS Library</strong><small>Показаны порциями, чтобы длинные внешности не тормозили окно.</small></div><span class="nw-counter">${shownLibrary.length}/${library.records.length}</span></div>${libraryLooks || libraryEmpty}${libraryMore}</section>
@@ -858,7 +859,15 @@ async function saveSettingsForm({ silent = false } = {}) {
             if (changed) { ui.siteLoadedAt = 0; ui.siteCharacters = []; ui.siteLoadError = ''; }
             settings.website = next;
             const tokenField = document.getElementById('nw-website-token');
-            if (tokenField) setWebsiteToken(tokenField.value);
+            if (tokenField?.value.trim()) {
+                setWebsiteToken(tokenField.value);
+                tokenField.value = '';
+            }
+            if (tokenField) tokenField.placeholder = getWebsiteToken() ? 'Токен действует в этой вкладке' : 'Введи fine-grained токен для GitHub';
+            const tokenIndicator = document.querySelector('.nw-token-indicator');
+            if (tokenIndicator) tokenIndicator.textContent = getWebsiteToken() ? 'Токен активен до перезагрузки' : 'Токен не введён';
+            const forgetTokenButton = document.querySelector('[data-action="forget-website-token"]');
+            if (forgetTokenButton) forgetTokenButton.disabled = !getWebsiteToken();
         } else if (ui.settingsTab === 'prompts') {
             const scanField = document.getElementById('nw-scan-prompt');
             const outfitField = document.getElementById('nw-generation-prompt');
@@ -870,7 +879,7 @@ async function saveSettingsForm({ silent = false } = {}) {
         }
         if (changed) commitSettings();
         if (ui.settingsTab === 'extra') ui.connectionStatus = 'Настройки сохранены.';
-        if (ui.settingsTab === 'website') ui.websiteStatus = 'Подключение сохранено.';
+        if (ui.settingsTab === 'website') ui.websiteStatus = 'Настройки сайта сохранены. GitHub-токен действует только до перезагрузки вкладки.';
         if (!silent && status) status.textContent = 'Настройки сохранены.';
         return true;
     } catch (error) {
@@ -917,9 +926,13 @@ async function exportLibraryAppearanceToWebsite(id) {
         notify('Сначала заполни GitHub в Настройки → Библиотека персонажей.', 'warning');
         return;
     }
+    const revision = operationRevision;
+    const confirmed = await Popup.show.confirm('Опубликовать внешность на GitHub?',
+        `Внешность «${escapeHtml(look.name)}» (имя и описание) будет отправлена в репозиторий ${escapeHtml(settings.website.githubUser)}/${escapeHtml(settings.website.githubRepo)}. В публичном репозитории данные доступны всем.`,
+        { okButton: 'Опубликовать', cancelButton: 'Отмена' });
+    if (!confirmed || revision !== operationRevision || !getWebsiteToken()) return;
     siteController?.abort();
     const controller = new AbortController();
-    const revision = operationRevision;
     siteController = controller;
     ui.websiteStatus = `Отправляю внешность «${look.name}» на сайт…`;
     setMessage('nw-settings-status', ui.websiteStatus);
@@ -954,7 +967,7 @@ async function exportSavedOutfitToWebsite(outfitId) {
     }
     const suggestedShelf = outfit.shelfName || 'Образы';
     const revision = operationRevision;
-    const popup = new Popup(`<div class="nw-site-export-dialog"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Отправить «${escapeHtml(outfit.name)}» на сайт</h3><small>Укажи полку. Если такого персонажа или полки ещё нет, они будут созданы автоматически. На сайт уйдут описание и первая картинка.</small></div>`, POPUP_TYPE.INPUT, suggestedShelf, { wide: false, okButton: 'Отправить', cancelButton: 'Отмена' });
+    const popup = new Popup(`<div class="nw-site-export-dialog"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Опубликовать «${escapeHtml(outfit.name)}» в GitHub?</h3><small>Только после подтверждения описание одежды и первая картинка будут отправлены в указанный репозиторий GitHub. При публичном репозитории их смогут видеть другие люди. Укажи полку для публикации.</small></div>`, POPUP_TYPE.INPUT, suggestedShelf, { wide: false, okButton: 'Опубликовать', cancelButton: 'Отмена' });
     const value = await popup.show();
     if (typeof value !== 'string' || revision !== operationRevision) return;
     const shelfName = normalizeName(value);
@@ -1129,6 +1142,10 @@ async function createInlineSubject() {
     try {
         if (editor.assignToDraft) {
             if (!settings.website.githubUser || !settings.website.githubRepo || !getWebsiteToken()) throw new Error('Укажи GitHub и токен в Настройки → Библиотека персонажей.');
+            const confirmed = await Popup.show.confirm('Опубликовать персонажа на GitHub?',
+                `Имя «${escapeHtml(name)}», описание и выбранное изображение будут отправлены в ${escapeHtml(settings.website.githubUser)}/${escapeHtml(settings.website.githubRepo)}. Если репозиторий публичный, эти данные смогут увидеть другие.`,
+                { okButton: 'Опубликовать', cancelButton: 'Отмена' });
+            if (!confirmed || ui.subjectCreator !== editor) return;
             const created = await createCharacterOnWebsite(websiteRequestConfig(), {
                 id: subject.id, name, description: editor.description, imageDataUrl: editor.imageDataUrl,
             });
@@ -1242,31 +1259,12 @@ async function saveOutfit() {
     const index = settings.outfits.findIndex(outfit => outfit.id === normalized.id && outfit.chatKey === key);
     if (index >= 0) settings.outfits[index] = normalized;
     else settings.outfits.push(normalized);
-    commitSettings(); // Always save the local version BEFORE network operations.
+    commitSettings();
     ui.draft = clone(normalized);
-    cloudBusy = true;
-    try {
-        if (normalized.images[0] && normalized.siteCharacterId && normalized.shelfName && getWebsiteToken() && settings.website.githubRepo && settings.website.githubUser) {
-            const result = await exportOutfitToWebsite(websiteRequestConfig(), { outfit: normalized, subject, shelfName: normalized.shelfName });
-            normalized.siteItemId = result.itemId;
-            const saved = settings.outfits.find(outfit => outfit.id === normalized.id && outfit.chatKey === key);
-            if (saved) saved.siteItemId = result.itemId;
-            commitSettings();
-            ui.siteLoadedAt = 0;
-            ui.siteLoadError = '';
-            notify('Наряд сохранён в этом чате и отправлен на сайт.', 'success');
-        } else {
-            notify('Наряд сохранён в этом чате. Для отправки на сайт выбери персонажа, полку, изображение и настрой токен.', 'info');
-        }
-        ui.view = 'gallery';
-        ui.status = '';
-        render();
-    } catch (error) {
-        ui.status = `Локальная копия сохранена. Не удалось отправить на сайт: ${error.message || error}`;
-        ui.draft = clone(normalized);
-        render();
-        notify(ui.status, 'error');
-    } finally { cloudBusy = false; }
+    ui.view = 'gallery';
+    ui.status = 'Наряд сохранён только в текущем чате. Для публикации используй отдельную кнопку «На сайт».';
+    render();
+    notify(ui.status, 'success');
 }
 
 async function deleteSavedOutfit(id) {
@@ -1697,6 +1695,13 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="delete-outfit"]', () => void deleteOutfit());
     $(document).on(`click${NS}`, '[data-action="delete-saved-outfit"]', function () { void deleteSavedOutfit(this.dataset.outfitId); });
     $(document).on(`click${NS}`, '[data-action="generate-outfit"]', () => void generateFromForm());
+    $(document).on(`click${NS}`, '[data-action="forget-website-token"]', function () {
+        clearWebsiteToken();
+        const input = document.getElementById('nw-website-token');
+        if (input) input.value = '';
+        ui.websiteStatus = 'Токен удалён из текущей сессии. Настройки сайта сохранены.';
+        render();
+    });
     $(document).on(`click${NS}`, '[data-action="save-settings"]', () => void saveSettingsForm());
     $(document).on(`click${NS}`, '[data-action="test-regex"]', () => void testRegex());
     $(document).on(`click${NS}`, '[data-action="refresh-profiles"]', async () => { if (await saveSettingsForm({ silent: true })) await refreshConnectionProfiles(true); });

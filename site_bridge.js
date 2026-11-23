@@ -11,6 +11,10 @@ function normalizeBaseUrl(value) {
     let url;
     try { url = new URL(raw); }
     catch { throw new Error('Проверь адрес сайта. Пример: https://логин.github.io/wardrobe/'); }
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+        throw new Error('Для сайта требуется HTTPS. Обычный HTTP разрешён только для локального сервера.');
+    }
     url.hash = '';
     url.search = '';
     if (/\.json$/i.test(url.pathname)) url.pathname = url.pathname.replace(/[^/]+$/, '');
@@ -113,7 +117,7 @@ async function responseError(response, fallback) {
 }
 
 async function readGithubFile(config, path, fetchImpl = fetch, optional = false) {
-    const response = await fetchImpl(apiUrl(config.githubUser, config.githubRepo, path), { headers: githubHeaders(config.token), signal: config.signal });
+    const response = await fetchImpl(apiUrl(config.githubUser, config.githubRepo, path), { headers: githubHeaders(config.token), signal: config.signal, redirect: 'error', referrerPolicy: 'no-referrer' });
     if (optional && response.status === 404) return null;
     if (!response.ok) throw await responseError(response, `Не удалось прочитать ${path}.`);
     const file = await response.json();
@@ -128,6 +132,8 @@ async function putGithubFile(config, path, content, message, sha = undefined, fe
         headers: { ...githubHeaders(config.token), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: config.signal,
+        redirect: 'error',
+        referrerPolicy: 'no-referrer',
     });
     if (!response.ok) throw await responseError(response, `Не удалось записать ${path}.`);
     return response.json();
@@ -144,7 +150,7 @@ export async function loadWebsiteData(config, fetchImpl = fetch) {
     const { data } = websiteUrls(config?.siteUrl);
     if (!data) throw new Error('Укажи адрес сайта-гардероба.');
     const separator = data.includes('?') ? '&' : '?';
-    const response = await fetchImpl(`${data}${separator}t=${Date.now()}`, { cache: 'no-store', signal: config?.signal });
+    const response = await fetchImpl(`${data}${separator}t=${Date.now()}`, { cache: 'no-store', signal: config?.signal, referrerPolicy: 'no-referrer' });
     if (!response.ok) throw new Error(`Не удалось загрузить wardrobe.json: ${response.status}.`);
     let body;
     try { body = await response.json(); }

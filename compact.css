@@ -652,3 +652,35 @@
         text-align: center;
     }
 }
+
+/* v1.7.4: privacy indicator and an explicit "forget token" control. */
+.nw-token-controls {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.nw-token-indicator {
+    min-width: 0;
+    font-size: .88em;
+    color: var(--nw-muted);
+    overflow-wrap: anywhere;
+}
+.nw-token-controls > .menu_button {
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 34px;
+    margin: 0;
+    padding: 5px 9px;
+}
+.nw-token-controls > .menu_button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+@media (max-width: 650px) {
+    .nw-token-controls {
+        gap: 6px;
+    }
+}
