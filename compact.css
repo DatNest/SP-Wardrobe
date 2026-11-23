@@ -1,0 +1,530 @@
+@import url("./style.css");
+
+/*
+ * NESS Wardrobe — compact, touch-friendly UI layer.
+ * Original behaviour and SillyTavern colour tokens are preserved.
+ * Loaded after style.css; keep all modifications scoped to Wardrobe.
+ */
+
+.nw-panel {
+    --nw-space-2: 6px;
+    --nw-space-3: 9px;
+    --nw-space-4: 12px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.nw-panel .menu_button,
+.nw-panel .text_pole,
+.nw-panel input,
+.nw-panel select,
+.nw-panel textarea {
+    font-size: inherit;
+    line-height: 1.3;
+}
+
+.nw-panel .menu_button {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.nw-panel .menu_button:focus-visible,
+.nw-panel .text_pole:focus-visible {
+    outline: 2px solid var(--nw-accent);
+    outline-offset: 2px;
+}
+
+.nw-header {
+    min-height: 39px;
+    padding: 6px 11px 4px;
+}
+
+.nw-brand { font-size: 1.25em; }
+
+.nw-nav {
+    gap: 5px;
+    padding: 0 11px 9px;
+}
+
+.nw-nav .menu_button {
+    min-width: 0 !important;
+    min-height: 37px;
+    padding: 5px 7px !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    line-height: 1.2;
+    text-align: center;
+    border-radius: 9px;
+}
+
+.nw-nav .menu_button span {
+    min-width: 0;
+}
+
+.nw-nav .menu_button.active,
+.nw-gallery-mode-tabs .menu_button.active,
+.nw-settings-tab.menu_button.active {
+    background: color-mix(in srgb, var(--nw-accent) 18%, var(--nw-surface)) !important;
+}
+
+.nw-content { padding: 10px 12px; }
+.nw-gallery-tools { gap: 5px; margin-bottom: 8px; }
+.nw-gallery-mode-tabs { gap: 6px; margin-bottom: 9px; }
+
+.nw-gallery-mode-tabs .menu_button {
+    min-height: 34px;
+    padding: 5px 9px;
+    border-radius: 9px 9px 3px 3px;
+}
+
+.nw-gallery-mode-tabs small {
+    min-width: 19px;
+    font-size: .85em;
+}
+
+.nw-chat-line { min-height: 31px; }
+.nw-chat-line small { font-size: .82em; }
+.nw-chat-line strong { font-size: 1em; }
+
+.nw-search-row { gap: 6px; }
+.nw-search-row .text_pole { min-height: 36px; }
+.nw-site-import-trigger.menu_button {
+    min-width: 0;
+    min-height: 36px;
+    padding: 5px 9px;
+}
+
+.nw-search-row > .menu_button.fa-fw,
+.nw-chat-line > .menu_button.fa-fw {
+    flex: 0 0 35px;
+    min-width: 35px !important;
+    width: 35px;
+    min-height: 35px;
+    padding: 5px;
+}
+
+.nw-filter-label { min-height: 25px; }
+.nw-filter-label > span { font-size: 1em; }
+.nw-clear-filter.menu_button { min-height: 25px; padding: 2px 7px; }
+.nw-filter-strip { gap: 5px; padding: 2px 1px 4px; }
+
+.nw-chip.menu_button {
+    min-height: 29px;
+    padding: 4px 9px;
+    font-size: .92em;
+}
+
+.nw-tag-pill,
+.nw-subject-chip,
+.nw-type-badge {
+    min-width: 0;
+    max-width: 100%;
+    gap: 5px;
+    padding: 4px 8px !important;
+    border-radius: 999px !important;
+}
+
+/* Exactly two visible rows, vertical finger scroll, no visible scrollbar. */
+.nw-tag-filter-strip,
+.nw-draft-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    align-items: flex-start;
+    gap: 5px;
+    max-height: 73px;
+    min-height: 34px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-width: none;
+}
+
+.nw-tag-filter-strip::-webkit-scrollbar,
+.nw-draft-tags::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.nw-tag-filter-strip > .nw-chip,
+.nw-draft-tags > .nw-chip {
+    flex: 0 1 auto;
+    max-width: calc(100% - 4px);
+}
+
+.nw-tag-filter-strip > small,
+.nw-draft-tags > small { align-self: center; }
+
+.nw-tag-add.menu_button {
+    flex: 0 0 30px !important;
+    width: 30px !important;
+    min-width: 30px !important;
+    height: 29px;
+    min-height: 29px;
+    margin: 0;
+    padding: 0 !important;
+    display: inline-grid !important;
+    place-items: center;
+    font-size: 20px;
+    font-weight: 500;
+    border: 1px dashed var(--nw-accent) !important;
+    border-radius: 9px !important;
+    background: color-mix(in srgb, var(--nw-accent) 11%, var(--nw-surface)) !important;
+}
+
+/* Card gallery, actions and status. */
+.nw-gallery-grid { gap: 8px; }
+.nw-outfit-card { border-radius: 10px; }
+.nw-outfit-copy { padding: 6px 7px 2px; }
+.nw-card-tags { padding: 2px 6px; }
+.nw-card-actions { padding: 1px 5px 5px; }
+.nw-card-actions .menu_button { min-height: 29px; min-width: 29px; }
+.nw-message:empty { display: none; }
+.nw-message { min-height: 0; }
+
+/* Create view: eliminate tall stacked buttons and oversized padding. */
+.nw-create-head {
+    gap: 8px;
+    margin-bottom: 9px;
+    align-items: end;
+}
+.nw-create-method { gap: 4px; }
+.nw-create-method > small { font-size: .86em; }
+.nw-mode-switch { padding: 2px; }
+.nw-mode-switch .menu_button {
+    min-width: 0 !important;
+    min-height: 36px;
+    padding: 5px 7px !important;
+    white-space: normal !important;
+}
+.nw-new-draft.menu_button {
+    min-height: 36px;
+    padding: 5px 9px !important;
+}
+.nw-mode-hint {
+    margin-bottom: 8px;
+    font-size: .88em;
+    line-height: 1.35;
+}
+.nw-outfit-form { gap: 9px; }
+.nw-form-card { gap: 9px; padding: 10px; border-radius: 10px; }
+.nw-form-card-head { gap: 8px; padding-bottom: 5px; }
+.nw-form-card-head strong { font-size: 1.02em; }
+.nw-form-card-head small { font-size: .83em; line-height: 1.25; }
+.nw-form-card > label,
+.nw-generator label,
+.nw-settings-pane > label,
+.nw-settings-grid label { gap: 4px; }
+.nw-generator { gap: 9px; padding: 10px; }
+.nw-field-row,
+.nw-action-row,
+.nw-form-actions { gap: 6px; }
+.nw-field-row > .menu_button,
+.nw-form-actions > .menu_button,
+.nw-action-row > .menu_button,
+.nw-generator > .menu_button,
+.nw-new-draft.menu_button,
+.nw-image-source-actions > .menu_button,
+.nw-image-source-actions > .nw-file-button {
+    min-width: 0 !important;
+    min-height: 36px;
+    padding: 6px 9px !important;
+    box-shadow: none;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    text-align: center;
+}
+.nw-form-actions > .menu_button span,
+.nw-action-row > .menu_button span,
+.nw-image-source-actions > .menu_button span,
+.nw-image-source-actions > .nw-file-button span { min-width: 0; }
+.nw-form-footer { padding: 3px 0 6px; }
+.nw-character-combo-trigger.menu_button { min-width: 0; }
+.nw-tag-picker { gap: 7px; }
+.nw-tag-search { min-height: 36px; padding-left: 9px; }
+.nw-tag-search .text_pole { min-height: 34px; }
+.nw-image-source-actions { gap: 6px; }
+.nw-image-source-actions > .menu_button,
+.nw-image-source-actions > .nw-file-button {
+    width: 100% !important;
+}
+.nw-image-list { gap: 6px; }
+
+/* Settings: shallow cards and purposeful information hierarchy. */
+.nw-settings-shell { gap: 6px; }
+.nw-settings-tabs { gap: 5px; }
+.nw-settings-tab.menu_button {
+    min-height: 34px;
+    padding: 5px 9px;
+    border-radius: 9px 9px 3px 3px;
+}
+.nw-settings-content {
+    padding: 10px;
+    border-radius: 10px;
+}
+.nw-settings-pane { gap: 9px; }
+.nw-settings-pane-head {
+    gap: 8px;
+    align-items: center;
+    padding-bottom: 7px;
+}
+.nw-settings-pane-head > div { gap: 1px; }
+.nw-settings-pane-head strong { font-size: 1.05em; }
+.nw-settings-pane-head small { font-size: .86em; line-height: 1.35; }
+.nw-settings-row {
+    display: grid;
+    gap: 7px;
+    padding: 9px;
+    border-radius: 10px;
+}
+.nw-settings-row-head { min-height: 27px; }
+.nw-settings-row-head .menu_button {
+    width: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    padding: 4px;
+}
+.nw-settings-row .nw-settings-grid { gap: 6px; }
+.nw-settings-row .nw-settings-grid input[type="color"] {
+    min-width: 0;
+    min-height: 35px;
+    height: 35px;
+    padding: 2px;
+}
+.nw-aliases { min-width: 0; }
+.nw-aliases > small { font-size: .86em; }
+.nw-alias-chips { gap: 5px; }
+.nw-alias-chips > .nw-alias-chip.menu_button {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    flex: 0 1 auto !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+}
+.nw-alias-chips > .nw-alias-input {
+    width: 100%;
+    min-width: 0;
+}
+.nw-alias-chip.menu_button { min-height: 28px; padding: 3px 7px !important; }
+.nw-alias-input { min-height: 34px; }
+.nw-settings-list { display: grid; gap: 7px; }
+
+/* Existing portrait and cloud-picker behaviour remains untouched. */
+.nw-site-look { gap: 7px; padding: 9px; border-radius: 10px; }
+.nw-site-look-head { gap: 7px; }
+.nw-site-only { min-width: 0; }
+.nw-active-editor { padding: 10px; gap: 8px; }
+.nw-active-editor textarea { min-height: 140px; }
+.nw-active-tabs { scrollbar-width: none; }
+.nw-active-tabs::-webkit-scrollbar { display: none; }
+
+@media (max-width: 650px) {
+    .popup:has(.nw-panel) {
+        width: calc(100dvw - 12px);
+        max-width: calc(100dvw - 12px);
+    }
+
+    .nw-panel {
+        height: calc(100dvh - 40px);
+        max-height: calc(100dvh - 40px);
+        min-height: 0;
+        font-size: 14px;
+    }
+
+    .nw-header { padding: 4px 8px; min-height: 34px; }
+    .nw-brand { font-size: 1.18em; }
+    .nw-nav { padding: 0 6px 7px; gap: 4px; }
+    .nw-nav .menu_button {
+        min-width: 0 !important;
+        width: 100% !important;
+        min-height: 38px;
+        gap: 4px;
+        padding: 5px 3px !important;
+        font-size: 12px;
+        white-space: normal !important;
+    }
+    .nw-nav .menu_button i { flex: 0 0 auto; }
+    .nw-nav .menu_button span { min-width: 0; overflow-wrap: anywhere; }
+    .nw-content { padding: 7px 8px 10px; }
+
+    .nw-gallery-mode-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+        overflow: visible;
+    }
+    .nw-gallery-mode-tabs .menu_button {
+        width: 100%;
+        min-width: 0 !important;
+        min-height: 37px;
+        padding: 5px 4px;
+        gap: 5px;
+        font-size: 12px;
+        white-space: normal !important;
+    }
+    .nw-gallery-mode-tabs .menu_button span { min-width: 0; }
+    .nw-gallery-mode-tabs .menu_button small { margin-left: auto; }
+    .nw-search-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) 35px;
+        gap: 5px;
+    }
+    .nw-search-row > * { min-width: 0; }
+    .nw-site-import-trigger.menu_button {
+        padding: 5px 7px;
+        font-size: 12px;
+    }
+    .nw-filter-label { min-height: 23px; }
+    .nw-gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+
+    .nw-create-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 39px;
+        align-items: end;
+        gap: 6px;
+    }
+    .nw-create-method {
+        flex: initial;
+        width: 100%;
+        min-width: 0;
+    }
+    .nw-mode-switch { width: 100%; }
+    .nw-mode-switch .menu_button {
+        min-height: 35px;
+        font-size: 12px;
+        gap: 4px;
+    }
+    .nw-new-draft.menu_button {
+        width: 39px !important;
+        min-width: 39px !important;
+        height: 39px;
+        margin: 0 !important;
+        padding: 0 !important;
+        font-size: 16px;
+    }
+    .nw-new-draft > span { display: none; }
+    .nw-form-card, .nw-generator { padding: 9px; }
+    .nw-form-card-head > div > small { display: none; }
+
+    .nw-field-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 35px 35px;
+        gap: 5px;
+    }
+    .nw-field-row > .menu_button {
+        min-width: 0 !important;
+        width: 100% !important;
+        flex: initial !important;
+        min-height: 36px;
+        padding: 5px !important;
+    }
+    .nw-character-combo-trigger.menu_button {
+        min-width: 0 !important;
+        flex: initial !important;
+        width: 100% !important;
+        gap: 5px;
+    }
+    .nw-field-row > .menu_button:not(.nw-character-combo-trigger) > span {
+        display: none;
+    }
+
+    .nw-image-source-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .nw-image-source-actions > .menu_button,
+    .nw-image-source-actions > .nw-file-button {
+        min-height: 38px;
+        font-size: 11px;
+        padding: 5px 4px !important;
+    }
+    .nw-image-source-actions .fa-solid { flex: none; }
+
+    .nw-settings-content { padding: 8px; }
+    .nw-settings-pane > .nw-action-row:has([data-action="new-subject"]) {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .nw-settings-pane > .nw-action-row:has([data-action="new-subject"]) > .menu_button {
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 36px;
+    }
+    .nw-settings-row .nw-settings-grid {
+        grid-template-columns: minmax(0, 1.3fr) minmax(87px, .9fr) 39px;
+        gap: 5px;
+    }
+    .nw-settings-row .nw-settings-grid .nw-color-field {
+        grid-column: auto;
+    }
+    .nw-settings-row .nw-settings-grid .nw-color-field input[type="color"] {
+        width: 39px;
+        min-width: 39px;
+        padding: 2px;
+    }
+    .nw-settings-row .nw-settings-grid label > span { font-size: .81em; }
+    .nw-settings-row .nw-settings-grid .text_pole {
+        min-height: 35px;
+        padding: 5px 6px;
+    }
+    .nw-settings-row .nw-settings-grid label {
+        min-width: 0;
+        gap: 3px;
+    }
+    .nw-settings-row .nw-alias-input { flex-basis: 100%; }
+    .nw-tag-settings-row {
+        grid-template-columns: 11px minmax(0, 1fr) 40px 30px;
+        gap: 5px;
+        align-items: center;
+    }
+    .nw-tag-settings-row input[type="color"] {
+        grid-column: auto;
+        grid-row: auto;
+        width: 40px;
+        height: 35px;
+    }
+    .nw-tag-settings-row .menu_button {
+        grid-column: auto;
+        grid-row: auto;
+        min-width: 30px;
+        min-height: 31px;
+        padding: 4px;
+    }
+    .nw-site-look-head { flex-direction: row; align-items: center; }
+    .nw-site-look-head > * { min-width: 0; }
+
+    .nw-active-editor > .nw-action-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .nw-active-editor > .nw-action-row > .menu_button {
+        min-width: 0 !important;
+        width: 100% !important;
+        min-height: 38px;
+        font-size: 12px;
+    }
+    .nw-active-editor > .nw-action-row > .menu_button:first-child {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 340px) {
+    .nw-nav .menu_button { font-size: 11px; gap: 3px; }
+    .nw-nav .menu_button i { display: none; }
+    .nw-settings-row .nw-settings-grid {
+        grid-template-columns: minmax(0, 1fr) 92px 35px;
+        gap: 4px;
+    }
+    .nw-settings-row .nw-settings-grid .nw-color-field input[type="color"] {
+        width: 35px;
+        min-width: 35px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nw-panel *, .nw-panel *::before, .nw-panel *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+    }
+}

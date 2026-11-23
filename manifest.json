@@ -4,8 +4,8 @@
   "requires": [],
   "optional": [],
   "js": "index.js",
-  "css": "style.css",
+  "css": "compact.css",
   "author": "Tane4ka",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "auto_update": false
 }
