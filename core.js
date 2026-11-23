@@ -51,6 +51,7 @@ export const DEFAULT_GENERATION_PROMPT = `Создай один практичн
 
 export const WARDROBE_MARKER_DEFAULTS = Object.freeze({
     mode: 'markers',
+    blockStartMarker: '[WARDROBE]',
     startMarker: '[LOOK:{{имя}}]',
     endMarker: '[/LOOK]',
     closingMarker: '[/WARDROBE]',
@@ -221,6 +222,7 @@ export function normalizeRegexRule(value) {
     const outfitGroup = plainText(source.outfitGroup || WARDROBE_RULE_DEFAULTS.outfitGroup, 40).trim();
     if (!nameGroup || !outfitGroup) throw new Error('Укажи группы имени и одежды.');
 
+    const blockStartMarker = plainText(source.blockStartMarker ?? (mode === 'markers' ? WARDROBE_MARKER_DEFAULTS.blockStartMarker : ''), 500).trim();
     const startMarker = plainText(source.startMarker ?? WARDROBE_MARKER_DEFAULTS.startMarker, 500).trim();
     const endMarker = plainText(source.endMarker ?? WARDROBE_MARKER_DEFAULTS.endMarker, 500).trim();
     if (mode === 'markers') {
@@ -248,7 +250,7 @@ export function normalizeRegexRule(value) {
         throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
     }
     return {
-        mode, startMarker, endMarker, regexClosingMarker, markerClosingMarker, regexEntryTemplate,
+        mode, blockStartMarker, startMarker, endMarker, regexClosingMarker, markerClosingMarker, regexEntryTemplate,
         pattern, flags, nameGroup, outfitGroup,
         searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, WARDROBE_RULE_DEFAULTS.searchDepth)),
         entryTemplate, closingMarker,
@@ -391,12 +393,25 @@ function wardrobeRegexWorker() {
                 const startPattern = new RegExp(escapeLiteral(markerParts[0]) + '([^\\r\\n]{1,120}?)' + escapeLiteral(markerParts[1]), 'g');
                 const endMarker = String(rule.endMarker || '');
                 const blockMarker = String(rule.closingMarker || '');
-                const lastClosing = blockMarker ? source.lastIndexOf(blockMarker) : -1;
-                const limit = lastClosing < 0 ? source.length : lastClosing;
-                // If the post has multiple complete blocks, use only the latest one.
-                const previousClosing = blockMarker && lastClosing >= 0
-                    ? source.lastIndexOf(blockMarker, Math.max(0, lastClosing - 1)) : -1;
-                const firstPosition = previousClosing >= 0 ? previousClosing + blockMarker.length : 0;
+                const blockStartMarker = String(rule.blockStartMarker || '');
+                const lastBlockOpen = blockStartMarker ? source.lastIndexOf(blockStartMarker) : -1;
+                if (blockStartMarker && lastBlockOpen < 0) return [];
+                let firstPosition = lastBlockOpen < 0 ? 0 : lastBlockOpen + blockStartMarker.length;
+                let limit = source.length;
+                if (blockMarker) {
+                    if (blockStartMarker) {
+                        const closing = source.indexOf(blockMarker, firstPosition);
+                        if (closing < 0) return [];
+                        limit = closing;
+                    } else {
+                        const closing = source.lastIndexOf(blockMarker);
+                        if (closing >= 0) {
+                            limit = closing;
+                            const previousClosing = source.lastIndexOf(blockMarker, closing - 1);
+                            if (previousClosing >= 0) firstPosition = previousClosing + blockMarker.length;
+                        }
+                    }
+                }
                 const findStart = position => {
                     startPattern.lastIndex = position;
                     const match = startPattern.exec(source);
@@ -483,9 +498,13 @@ function wardrobeRegexWorker() {
             if (operation === 'scanMany') {
                 const marker = String(closingMarker || rule.closingMarker || '');
                 for (const item of Array.isArray(texts) ? texts : []) {
-                    const hasMarker = marker ? String(item.text || '').includes(marker) : false;
+                    const post = String(item.text || '');
+                    const blockStart = rule.mode === 'markers' ? String(rule.blockStartMarker || '') : '';
+                    const blockOpenPosition = blockStart ? post.lastIndexOf(blockStart) : 0;
+                    if (blockStart && blockOpenPosition < 0) continue;
+                    const hasMarker = marker ? post.indexOf(marker, blockOpenPosition + blockStart.length) >= 0 : false;
                     if (marker && !hasMarker) continue;
-                    const entries = publicEntries(item.text);
+                    const entries = publicEntries(post);
                     if (entries.length || hasMarker) {
                         self.postMessage({ entries, key: item.key, hasMarker });
                         return;
@@ -512,8 +531,11 @@ function wardrobeRegexWorker() {
             if (operation === 'append') {
                 const source = String(text || '');
                 const marker = String(closingMarker || rule.closingMarker || '');
-                const position = marker ? source.lastIndexOf(marker) : -1;
-                if (position < 0) throw new Error('В выбранном посте не найден маркер конца гардероба.');
+                const blockStart = rule.mode === 'markers' ? String(rule.blockStartMarker || '') : '';
+                const blockOpenPosition = blockStart ? source.lastIndexOf(blockStart) : 0;
+                const position = marker && blockOpenPosition >= 0
+                    ? source.indexOf(marker, blockOpenPosition + blockStart.length) : -1;
+                if (position < 0) throw new Error('В выбранном посте не найден конец блока гардероба.');
                 const row = String(entryText || '').trim();
                 if (!row) throw new Error('Шаблон новой строки получился пустым.');
                 const before = source.slice(0, position);
