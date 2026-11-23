@@ -1,15 +1,21 @@
-const TOKEN_KEY = 'ness_wardrobe_github_token_v1';
+// GitHub credentials are deliberately kept only in this module's memory.
+// Never copy them to SillyTavern settings, the DOM or browser storage.
+// Updating from pre-1.7.4 also removes the old persistent token.
+const LEGACY_STORAGE_KEY = 'ness_wardrobe_github_token_v1';
+let sessionToken = '';
+
+try { globalThis.localStorage?.removeItem(LEGACY_STORAGE_KEY); }
+catch { /* Browser storage may be disabled. */ }
 
 export function getWebsiteToken() {
-    try { return globalThis.localStorage?.getItem(TOKEN_KEY) || ''; }
-    catch { return ''; }
+    return sessionToken;
 }
 
 export function setWebsiteToken(value) {
-    const token = String(value || '').trim();
-    try {
-        if (token) globalThis.localStorage?.setItem(TOKEN_KEY, token);
-        else globalThis.localStorage?.removeItem(TOKEN_KEY);
-    } catch { /* unavailable in private or restricted browser mode */ }
-    return token;
+    sessionToken = String(value ?? '').trim();
+    return Boolean(sessionToken);
+}
+
+export function clearWebsiteToken() {
+    sessionToken = '';
 }
