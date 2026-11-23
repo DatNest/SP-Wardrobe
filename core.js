@@ -231,25 +231,24 @@ export function normalizeRegexRule(value) {
         if (startMarker.replace(placeholders[0], '').trim().length < 2) {
             throw new Error('Начало записи должно содержать обозначение, например [LOOK:{{имя}}].');
         }
-        if (/[\r\n]/.test(startMarker) || /[\r\n]/.test(endMarker)) {
-            throw new Error('Метки начала и конца записи должны занимать по одной строке.');
-        }
     }
-    const closingMarker = plainText(source.closingMarker ?? (mode === 'markers'
-        ? WARDROBE_MARKER_DEFAULTS.closingMarker : WARDROBE_RULE_DEFAULTS.closingMarker), 500).trim();
+    const regexClosingMarker = plainText(source.regexClosingMarker ?? (mode === 'regex'
+        ? source.closingMarker : WARDROBE_RULE_DEFAULTS.closingMarker), 500).trim();
+    const markerClosingMarker = plainText(source.markerClosingMarker ?? (mode === 'markers'
+        ? source.closingMarker : WARDROBE_MARKER_DEFAULTS.closingMarker), 500).trim();
+    const closingMarker = mode === 'markers' ? markerClosingMarker : regexClosingMarker;
     if (mode === 'regex' && !closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
-    if (mode === 'markers' && /[\r\n]/.test(closingMarker)) {
-        throw new Error('Конец блока гардероба должен занимать одну строку.');
-    }
 
+    const regexEntryTemplate = plainText(source.regexEntryTemplate || (mode === 'regex'
+        ? source.entryTemplate : WARDROBE_RULE_DEFAULTS.entryTemplate), 2000).trim();
     const entryTemplate = mode === 'markers'
         ? startMarker.replace(/\{\{(?:имя|name)\}\}/, '{{name}}') + '\n{{outfit}}' + (endMarker ? '\n' + endMarker : '')
-        : plainText(source.entryTemplate || WARDROBE_RULE_DEFAULTS.entryTemplate, 2000).trim();
+        : regexEntryTemplate;
     if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) {
         throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
     }
     return {
-        mode, startMarker, endMarker,
+        mode, startMarker, endMarker, regexClosingMarker, markerClosingMarker, regexEntryTemplate,
         pattern, flags, nameGroup, outfitGroup,
         searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, WARDROBE_RULE_DEFAULTS.searchDepth)),
         entryTemplate, closingMarker,
