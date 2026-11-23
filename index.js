@@ -712,6 +712,10 @@ function insertionSettingsPaneHtml() {
             <small>Обычные метки сравниваются буквально: символы [ ] &lt; &gt; ? * + не требуют экранирования.</small>
         </label>
         <div id="nw-marker-rule-fields" class="nw-rule-fields" ${markers ? '' : 'hidden'}>
+            <label><span>Начало всего блока <small>необязательно</small></span>
+                <textarea id="nw-marker-block-start" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false" placeholder="[WARDROBE]">${escapeHtml(rule.blockStartMarker)}</textarea>
+                <small>Например [WARDROBE] или &lt;section data-wardrobe="true"&gt;. Помогает найти именно гардероб, даже если в посте несколько похожих HTML-тегов. Оставь пустым для поиска без начальной границы.</small>
+            </label>
             <label><span>Начало записи (вместо имени — {{имя}})</span>
                 <textarea id="nw-marker-start" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false" placeholder="[LOOK:{{имя}}]">${escapeHtml(rule.startMarker)}</textarea>
                 <small>Скопируй начало записи как есть и замени только имя на {{имя}} или {{name}}. Подойдут [LOOK:{{имя}}], &lt;look name="{{имя}}"&gt; и &lt;!-- LOOK: {{имя}} --&gt;.</small>
@@ -827,6 +831,7 @@ function readRegexForm() {
     const mode = document.getElementById('nw-rule-mode')?.value || settings.regex.mode;
     return normalizeRegexRule({
         mode,
+        blockStartMarker: document.getElementById('nw-marker-block-start')?.value ?? settings.regex.blockStartMarker,
         startMarker: document.getElementById('nw-marker-start')?.value ?? settings.regex.startMarker,
         endMarker: document.getElementById('nw-marker-end')?.value ?? settings.regex.endMarker,
         markerClosingMarker: document.getElementById('nw-marker-closing-marker')?.value ?? settings.regex.markerClosingMarker,
