@@ -684,3 +684,25 @@
         gap: 6px;
     }
 }
+
+/* Literal text/HTML marker editor with independent legacy regex controls. */
+.nw-insertion-pane { align-content: start; }
+.nw-insertion-pane > label { min-width: 0; display: grid; gap: 5px; }
+.nw-insertion-pane #nw-rule-mode { width: 100%; min-width: 0; max-width: 100%; }
+.nw-rule-fields {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--nw-border) 75%, transparent);
+    border-radius: 10px;
+    padding: 10px;
+}
+.nw-rule-fields[hidden] { display: none !important; }
+.nw-rule-fields > label { min-width: 0; display: grid; gap: 5px; }
+.nw-rule-fields > label > small,
+.nw-insertion-pane > label > small { line-height: 1.5; overflow-wrap: anywhere; }
+.nw-rule-fields .nw-code-field { width: 100%; min-width: 0; resize: vertical; overflow-wrap: anywhere; }
+@media (max-width: 650px) {
+    .nw-rule-fields { padding: 8px; gap: 10px; }
+    .nw-insertion-pane .nw-action-row > .menu_button { min-width: 0 !important; flex: 1 1 auto; white-space: normal !important; }
+}
