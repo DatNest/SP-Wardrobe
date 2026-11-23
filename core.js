@@ -49,6 +49,13 @@ export const DEFAULT_GENERATION_PROMPT = `Создай один практичн
 Верни только JSON:
 {"name":"короткое название наряда","description":"готовое описание одежды для вставки в пост"}`;
 
+export const WARDROBE_MARKER_DEFAULTS = Object.freeze({
+    mode: 'markers',
+    startMarker: '[LOOK:{{имя}}]',
+    endMarker: '[/LOOK]',
+    closingMarker: '[/WARDROBE]',
+});
+
 const LEGACY_WARDROBE_PATTERN = '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)';
 
 export const WARDROBE_RULE_DEFAULTS = Object.freeze({
@@ -70,7 +77,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     subjects: [],
     tags: [],
     outfits: [],
-    regex: WARDROBE_RULE_DEFAULTS,
+    regex: { ...WARDROBE_RULE_DEFAULTS, ...WARDROBE_MARKER_DEFAULTS },
     connection: { profileId: 'auto' },
     website: { siteUrl: '', githubUser: '', githubRepo: '' },
     prompts: { scan: DEFAULT_SCAN_PROMPT, outfit: DEFAULT_GENERATION_PROMPT },
@@ -191,6 +198,8 @@ export function emptyOutfit(subjectId = '') {
 
 export function normalizeRegexRule(value) {
     const source = value && typeof value === 'object' ? value : {};
+    // Existing saved rules did not have a mode and must keep RegExp behaviour.
+    const mode = source.mode === 'markers' ? 'markers' : 'regex';
     let pattern = plainText(source.pattern ?? WARDROBE_RULE_DEFAULTS.pattern, 4000);
     let flags = plainText(source.flags ?? WARDROBE_RULE_DEFAULTS.flags, 8);
     if (pattern === LEGACY_WARDROBE_PATTERN) {
@@ -211,18 +220,39 @@ export function normalizeRegexRule(value) {
     const nameGroup = plainText(source.nameGroup || WARDROBE_RULE_DEFAULTS.nameGroup, 40).trim();
     const outfitGroup = plainText(source.outfitGroup || WARDROBE_RULE_DEFAULTS.outfitGroup, 40).trim();
     if (!nameGroup || !outfitGroup) throw new Error('Укажи группы имени и одежды.');
-    const entryTemplate = plainText(source.entryTemplate || WARDROBE_RULE_DEFAULTS.entryTemplate, 2000).trim();
-    const closingMarker = plainText(source.closingMarker || WARDROBE_RULE_DEFAULTS.closingMarker, 500).trim();
-    if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
-    if (!closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
+
+    const startMarker = plainText(source.startMarker ?? WARDROBE_MARKER_DEFAULTS.startMarker, 500).trim();
+    const endMarker = plainText(source.endMarker ?? WARDROBE_MARKER_DEFAULTS.endMarker, 500).trim();
+    if (mode === 'markers') {
+        const placeholders = startMarker.match(/\{\{(?:имя|name)\}\}/g) || [];
+        if (placeholders.length !== 1) {
+            throw new Error('В начале записи должна быть ровно одна переменная {{имя}} или {{name}}.');
+        }
+        if (startMarker.replace(placeholders[0], '').trim().length < 2) {
+            throw new Error('Начало записи должно содержать обозначение, например [LOOK:{{имя}}].');
+        }
+        if (/[\r\n]/.test(startMarker) || /[\r\n]/.test(endMarker)) {
+            throw new Error('Метки начала и конца записи должны занимать по одной строке.');
+        }
+    }
+    const closingMarker = plainText(source.closingMarker ?? (mode === 'markers'
+        ? WARDROBE_MARKER_DEFAULTS.closingMarker : WARDROBE_RULE_DEFAULTS.closingMarker), 500).trim();
+    if (mode === 'regex' && !closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
+    if (mode === 'markers' && /[\r\n]/.test(closingMarker)) {
+        throw new Error('Конец блока гардероба должен занимать одну строку.');
+    }
+
+    const entryTemplate = mode === 'markers'
+        ? startMarker.replace(/\{\{(?:имя|name)\}\}/, '{{name}}') + '\n{{outfit}}' + (endMarker ? '\n' + endMarker : '')
+        : plainText(source.entryTemplate || WARDROBE_RULE_DEFAULTS.entryTemplate, 2000).trim();
+    if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) {
+        throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
+    }
     return {
-        pattern,
-        flags,
-        nameGroup,
-        outfitGroup,
+        mode, startMarker, endMarker,
+        pattern, flags, nameGroup, outfitGroup,
         searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, WARDROBE_RULE_DEFAULTS.searchDepth)),
-        entryTemplate,
-        closingMarker,
+        entryTemplate, closingMarker,
     };
 }
 
