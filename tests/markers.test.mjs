@@ -50,6 +50,7 @@ test('plain-text markers can scan, replace, delete and append without touching o
 test('literal HTML tags work with nested HTML content', () => {
     const rule = core.normalizeRegexRule({
         ...core.DEFAULT_SETTINGS.regex,
+        blockStartMarker: '<section data-wardrobe="true">',
         startMarker: '<look name="{{имя}}">',
         endMarker: '</look>',
         markerClosingMarker: '</section>',
@@ -63,6 +64,7 @@ test('literal HTML tags work with nested HTML content', () => {
 test('HTML comments and RegExp-special characters are treated literally', () => {
     const rule = core.normalizeRegexRule({
         ...core.DEFAULT_SETTINGS.regex,
+        blockStartMarker: '',
         startMarker: '<!-- [LOOK+*?]: {{имя}} -->',
         endMarker: '<!-- /LOOK -->',
         markerClosingMarker: '<!-- /WARDROBE -->',
@@ -74,6 +76,7 @@ test('HTML comments and RegExp-special characters are treated literally', () => 
 test('optional closing tag for each entry and configurable plain markers', () => {
     const rule = core.normalizeRegexRule({
         ...core.DEFAULT_SETTINGS.regex,
+        blockStartMarker: '',
         startMarker: 'Имя: {{name}} — одежда:',
         endMarker: '',
         markerClosingMarker: 'Конец гардероба',
