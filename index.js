@@ -699,13 +699,62 @@ function promptEditorHtml(info) {
     </section>`;
 }
 
+function insertionSettingsPaneHtml() {
+    const rule = settings.regex;
+    const markers = rule.mode === 'markers';
+    return `<section class="nw-settings-pane nw-insertion-pane" role="tabpanel">
+        <div class="nw-settings-pane-head"><div><strong>Вставка в пост</strong><small>Ищет самый свежий подходящий блок в последних постах и заменяет только нужную одежду.</small></div></div>
+        <label><span>Как искать одежду</span>
+            <select id="nw-rule-mode" class="text_pole">
+                <option value="markers" ${markers ? 'selected' : ''}>Обычные метки — текст или HTML</option>
+                <option value="regex" ${markers ? '' : 'selected'}>Регулярное выражение — RegExp</option>
+            </select>
+            <small>Обычные метки сравниваются буквально: символы [ ] &lt; &gt; ? * + не требуют экранирования.</small>
+        </label>
+        <div id="nw-marker-rule-fields" class="nw-rule-fields" ${markers ? '' : 'hidden'}>
+            <label><span>Начало всего блока <small>необязательно</small></span>
+                <textarea id="nw-marker-block-start" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false" placeholder="[WARDROBE]">${escapeHtml(rule.blockStartMarker)}</textarea>
+                <small>Например [WARDROBE] или &lt;section data-wardrobe="true"&gt;. Помогает найти именно гардероб, даже если в посте несколько похожих HTML-тегов. Оставь пустым для поиска без начальной границы.</small>
+            </label>
+            <label><span>Начало записи (вместо имени — {{имя}})</span>
+                <textarea id="nw-marker-start" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false" placeholder="[LOOK:{{имя}}]">${escapeHtml(rule.startMarker)}</textarea>
+                <small>Скопируй начало записи как есть и замени только имя на {{имя}} или {{name}}. Подойдут [LOOK:{{имя}}], &lt;look name="{{имя}}"&gt; и &lt;!-- LOOK: {{имя}} --&gt;.</small>
+            </label>
+            <label><span>Конец записи <small>необязательно</small></span>
+                <textarea id="nw-marker-end" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false" placeholder="[/LOOK]">${escapeHtml(rule.endMarker)}</textarea>
+                <small>Например [/LOOK], &lt;/look&gt; или &lt;!-- /LOOK --&gt;. Если пусто, запись заканчивается перед следующей записью или концом блока.</small>
+            </label>
+            <label><span>Конец всего блока гардероба</span>
+                <textarea id="nw-marker-closing-marker" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false" placeholder="[/WARDROBE]">${escapeHtml(rule.markerClosingMarker)}</textarea>
+                <small>Например [/WARDROBE], &lt;/section&gt; или &lt;!-- /WARDROBE --&gt;. Нужен, чтобы расширение могло безопасно добавить новую запись.</small>
+            </label>
+        </div>
+        <div id="nw-regex-rule-fields" class="nw-rule-fields" ${markers ? 'hidden' : ''}>
+            <label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="5" maxlength="4000" spellcheck="false">${escapeHtml(rule.pattern)}</textarea></label>
+            <div class="nw-settings-grid">
+                <label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label>
+                <label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label>
+                <label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label>
+            </div>
+            <label><span>Шаблон новой строки</span><textarea id="nw-regex-entry-template" class="text_pole nw-code-field" rows="2" maxlength="2000">${escapeHtml(rule.regexEntryTemplate)}</textarea><small>Переменные {{name}} и {{outfit}} заменяются автоматически.</small></label>
+            <label><span>Маркер конца всего блока</span><textarea id="nw-regex-closing-marker" class="text_pole nw-code-field" rows="2" maxlength="500" spellcheck="false">${escapeHtml(rule.regexClosingMarker)}</textarea></label>
+        </div>
+        <label><span>Сколько последних постов проверить</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label>
+        <div class="nw-action-row">
+            <button class="menu_button" data-action="test-regex"><i class="fa-solid fa-vial"></i><span>Проверить на текущем чате</span></button>
+            <button class="menu_button nw-main-action" data-action="save-settings"><i class="fa-solid fa-floppy-disk"></i><span>Сохранить</span></button>
+        </div>
+        <div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div>
+    </section>`;
+}
+
 function settingsViewHtml() {
     const rule = settings.regex;
     const tab = SETTINGS_TABS.some(item => item.id === ui.settingsTab) ? ui.settingsTab : 'website';
     const tabs = SETTINGS_TABS.map(item => `<button class="menu_button nw-settings-tab${tab === item.id ? ' active' : ''}" role="tab" aria-selected="${tab === item.id}" data-settings-tab="${item.id}"><i class="fa-solid ${item.icon}" aria-hidden="true"></i><span>${item.label}</span></button>`).join('');
     const panes = {
         website: websiteSettingsPaneHtml,
-        insertion: () => `<section class="nw-settings-pane" role="tabpanel"><div class="nw-settings-pane-head"><div><strong>Вставка в пост</strong><small>Проверяется указанное число последних постов, но меняется только самый свежий найденный блок гардероба.</small></div></div><label><span>Регулярное выражение</span><textarea id="nw-regex-pattern" class="text_pole nw-code-field" rows="5" placeholder="Например: ...(?&lt;name&gt;...)(?&lt;outfit&gt;...)">${escapeHtml(rule.pattern)}</textarea></label><div class="nw-settings-grid"><label><span>Флаги</span><input id="nw-regex-flags" class="text_pole" value="${escapeHtml(rule.flags)}" maxlength="8"></label><label><span>Группа имени</span><input id="nw-regex-name-group" class="text_pole" value="${escapeHtml(rule.nameGroup)}" maxlength="40"></label><label><span>Группа одежды</span><input id="nw-regex-outfit-group" class="text_pole" value="${escapeHtml(rule.outfitGroup)}" maxlength="40"></label><label><span>Сколько последних постов проверить</span><input id="nw-regex-depth" class="text_pole" type="number" min="1" max="100" value="${rule.searchDepth}"></label></div><label><span>Шаблон новой строки</span><textarea id="nw-regex-entry-template" class="text_pole nw-code-field" rows="2" maxlength="2000">${escapeHtml(rule.entryTemplate)}</textarea><small>Оставь переменные {{name}} и {{outfit}} — вместо них подставятся имя и описание.</small></label><label><span>Маркер конца гардероба</span><input id="nw-regex-closing-marker" class="text_pole nw-code-field" maxlength="500" value="${escapeHtml(rule.closingMarker)}"></label><div class="nw-action-row"><button class="menu_button" data-action="test-regex">Проверить правило</button><button class="menu_button nw-main-action" data-action="save-settings">Сохранить</button></div><div id="nw-settings-status" class="nw-message" role="status" aria-live="polite"></div></section>`,
+        insertion: insertionSettingsPaneHtml,
         prompts: () => `<section class="nw-settings-pane nw-prompts-pane" role="tabpanel">
             <div class="nw-settings-pane-head"><div><strong>Промпты генерации нарядов</strong><small>Открой нужный промпт для редактирования. Нажми ?, чтобы прочитать, когда он используется.</small></div></div>
             ${PROMPT_EDITOR_INFO.map(promptEditorHtml).join('')}
@@ -779,14 +828,20 @@ function showPanel() {
 }
 
 function readRegexForm() {
+    const mode = document.getElementById('nw-rule-mode')?.value || settings.regex.mode;
     return normalizeRegexRule({
+        mode,
+        blockStartMarker: document.getElementById('nw-marker-block-start')?.value ?? settings.regex.blockStartMarker,
+        startMarker: document.getElementById('nw-marker-start')?.value ?? settings.regex.startMarker,
+        endMarker: document.getElementById('nw-marker-end')?.value ?? settings.regex.endMarker,
+        markerClosingMarker: document.getElementById('nw-marker-closing-marker')?.value ?? settings.regex.markerClosingMarker,
         pattern: document.getElementById('nw-regex-pattern')?.value ?? settings.regex.pattern,
         flags: document.getElementById('nw-regex-flags')?.value ?? settings.regex.flags,
         nameGroup: document.getElementById('nw-regex-name-group')?.value ?? settings.regex.nameGroup,
         outfitGroup: document.getElementById('nw-regex-outfit-group')?.value ?? settings.regex.outfitGroup,
+        regexEntryTemplate: document.getElementById('nw-regex-entry-template')?.value ?? settings.regex.regexEntryTemplate,
+        regexClosingMarker: document.getElementById('nw-regex-closing-marker')?.value ?? settings.regex.regexClosingMarker,
         searchDepth: document.getElementById('nw-regex-depth')?.value ?? settings.regex.searchDepth,
-        entryTemplate: document.getElementById('nw-regex-entry-template')?.value ?? settings.regex.entryTemplate,
-        closingMarker: document.getElementById('nw-regex-closing-marker')?.value ?? settings.regex.closingMarker,
     });
 }
 
@@ -1703,6 +1758,14 @@ function bindEvents() {
         render();
     });
     $(document).on(`click${NS}`, '[data-action="save-settings"]', () => void saveSettingsForm());
+    $(document).on(`change${NS}`, '#nw-rule-mode', function () {
+        const markerMode = this.value === 'markers';
+        const plainFields = document.getElementById('nw-marker-rule-fields');
+        const regexFields = document.getElementById('nw-regex-rule-fields');
+        if (plainFields) plainFields.hidden = !markerMode;
+        if (regexFields) regexFields.hidden = markerMode;
+        setMessage('nw-settings-status', 'Режим изменён. Нажми «Сохранить», чтобы применить новые настройки.');
+    });
     $(document).on(`click${NS}`, '[data-action="test-regex"]', () => void testRegex());
     $(document).on(`click${NS}`, '[data-action="refresh-profiles"]', async () => { if (await saveSettingsForm({ silent: true })) await refreshConnectionProfiles(true); });
     $(document).on(`click${NS}`, '[data-action="test-profile"]', () => void testSelectedProfile());

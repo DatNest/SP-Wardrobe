@@ -49,6 +49,14 @@ export const DEFAULT_GENERATION_PROMPT = `Создай один практичн
 Верни только JSON:
 {"name":"короткое название наряда","description":"готовое описание одежды для вставки в пост"}`;
 
+export const WARDROBE_MARKER_DEFAULTS = Object.freeze({
+    mode: 'markers',
+    blockStartMarker: '[WARDROBE]',
+    startMarker: '[LOOK:{{имя}}]',
+    endMarker: '[/LOOK]',
+    closingMarker: '[/WARDROBE]',
+});
+
 const LEGACY_WARDROBE_PATTERN = '⟦ОДЕЖДА:(?<name>[^⟧\\r\\n]+)⟧[ \\t]*(?<outfit>.*?)(?=\\r?\\n⟦ОДЕЖДА:|\\r?\\n⟦/ГАРДЕРОБ⟧)';
 
 export const WARDROBE_RULE_DEFAULTS = Object.freeze({
@@ -70,7 +78,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     subjects: [],
     tags: [],
     outfits: [],
-    regex: WARDROBE_RULE_DEFAULTS,
+    regex: { ...WARDROBE_RULE_DEFAULTS, ...WARDROBE_MARKER_DEFAULTS },
     connection: { profileId: 'auto' },
     website: { siteUrl: '', githubUser: '', githubRepo: '' },
     prompts: { scan: DEFAULT_SCAN_PROMPT, outfit: DEFAULT_GENERATION_PROMPT },
@@ -191,6 +199,8 @@ export function emptyOutfit(subjectId = '') {
 
 export function normalizeRegexRule(value) {
     const source = value && typeof value === 'object' ? value : {};
+    // Existing saved rules did not have a mode and must keep RegExp behaviour.
+    const mode = source.mode === 'markers' ? 'markers' : 'regex';
     let pattern = plainText(source.pattern ?? WARDROBE_RULE_DEFAULTS.pattern, 4000);
     let flags = plainText(source.flags ?? WARDROBE_RULE_DEFAULTS.flags, 8);
     if (pattern === LEGACY_WARDROBE_PATTERN) {
@@ -206,23 +216,45 @@ export function normalizeRegexRule(value) {
         }
     }
     if (!/^[gimsu]*$/.test(flags) || new Set(flags).size !== flags.length) {
-        throw new Error('Флаги могут содержать только g, i, m, s, u без повторов.');
+        if (mode === 'regex') throw new Error('Флаги могут содержать только g, i, m, s, u без повторов.');
+        flags = WARDROBE_RULE_DEFAULTS.flags;
     }
     const nameGroup = plainText(source.nameGroup || WARDROBE_RULE_DEFAULTS.nameGroup, 40).trim();
     const outfitGroup = plainText(source.outfitGroup || WARDROBE_RULE_DEFAULTS.outfitGroup, 40).trim();
     if (!nameGroup || !outfitGroup) throw new Error('Укажи группы имени и одежды.');
-    const entryTemplate = plainText(source.entryTemplate || WARDROBE_RULE_DEFAULTS.entryTemplate, 2000).trim();
-    const closingMarker = plainText(source.closingMarker || WARDROBE_RULE_DEFAULTS.closingMarker, 500).trim();
-    if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
-    if (!closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
+
+    const blockStartMarker = plainText(source.blockStartMarker ?? (mode === 'markers' ? WARDROBE_MARKER_DEFAULTS.blockStartMarker : ''), 500).trim();
+    const startMarker = plainText(source.startMarker ?? WARDROBE_MARKER_DEFAULTS.startMarker, 500).trim();
+    const endMarker = plainText(source.endMarker ?? WARDROBE_MARKER_DEFAULTS.endMarker, 500).trim();
+    if (mode === 'markers') {
+        const placeholders = startMarker.match(/\{\{(?:имя|name)\}\}/g) || [];
+        if (placeholders.length !== 1) {
+            throw new Error('В начале записи должна быть ровно одна переменная {{имя}} или {{name}}.');
+        }
+        if (startMarker.replace(placeholders[0], '').trim().length < 2) {
+            throw new Error('Начало записи должно содержать обозначение, например [LOOK:{{имя}}].');
+        }
+    }
+    const regexClosingMarker = plainText(source.regexClosingMarker ?? (mode === 'regex'
+        ? source.closingMarker : WARDROBE_RULE_DEFAULTS.closingMarker), 500).trim();
+    const markerClosingMarker = plainText(source.markerClosingMarker ?? (mode === 'markers'
+        ? source.closingMarker : WARDROBE_MARKER_DEFAULTS.closingMarker), 500).trim();
+    const closingMarker = mode === 'markers' ? markerClosingMarker : regexClosingMarker;
+    if (mode === 'regex' && !closingMarker) throw new Error('Укажи маркер конца блока гардероба.');
+
+    const regexEntryTemplate = plainText(source.regexEntryTemplate || (mode === 'regex'
+        ? source.entryTemplate : WARDROBE_RULE_DEFAULTS.entryTemplate), 2000).trim();
+    const entryTemplate = mode === 'markers'
+        ? startMarker.replace(/\{\{(?:имя|name)\}\}/, '{{name}}') + '\n{{outfit}}' + (endMarker ? '\n' + endMarker : '')
+        : regexEntryTemplate;
+    if (!entryTemplate.includes('{{name}}') || !entryTemplate.includes('{{outfit}}')) {
+        throw new Error('Шаблон новой строки должен содержать {{name}} и {{outfit}}.');
+    }
     return {
-        pattern,
-        flags,
-        nameGroup,
-        outfitGroup,
+        mode, blockStartMarker, startMarker, endMarker, regexClosingMarker, markerClosingMarker, regexEntryTemplate,
+        pattern, flags, nameGroup, outfitGroup,
         searchDepth: Math.round(clampNumber(source.searchDepth, 1, 100, WARDROBE_RULE_DEFAULTS.searchDepth)),
-        entryTemplate,
-        closingMarker,
+        entryTemplate, closingMarker,
     };
 }
 
@@ -348,12 +380,91 @@ function wardrobeRegexWorker() {
     self.onmessage = event => {
         try {
             const { operation, text, texts, rule, replacement, entryIndex, entryText, closingMarker } = event.data || {};
-            compile(rule);
+            if (rule.mode !== 'markers') compile(rule);
             if (operation === 'validate') {
                 self.postMessage({ valid: true });
                 return;
             }
+            const escapeLiteral = value => String(value).replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+            const inspectMarkers = raw => {
+                const source = String(raw || '');
+                const startMarker = String(rule.startMarker || '');
+                const markerParts = startMarker.split(/\{\{(?:имя|name)\}\}/g);
+                if (markerParts.length !== 2) throw new Error('В начале записи требуется ровно одна переменная {{имя}} или {{name}}.');
+                const startPattern = new RegExp(escapeLiteral(markerParts[0]) + '([^\\r\\n]{1,120}?)' + escapeLiteral(markerParts[1]), 'g');
+                const endMarker = String(rule.endMarker || '');
+                const blockMarker = String(rule.closingMarker || '');
+                const blockStartMarker = String(rule.blockStartMarker || '');
+                const lastBlockOpen = blockStartMarker ? source.lastIndexOf(blockStartMarker) : -1;
+                if (blockStartMarker && lastBlockOpen < 0) return [];
+                let firstPosition = lastBlockOpen < 0 ? 0 : lastBlockOpen + blockStartMarker.length;
+                let limit = source.length;
+                if (blockMarker) {
+                    if (blockStartMarker) {
+                        const closing = source.indexOf(blockMarker, firstPosition);
+                        if (closing < 0) return [];
+                        limit = closing;
+                    } else {
+                        const closing = source.lastIndexOf(blockMarker);
+                        if (closing >= 0) {
+                            limit = closing;
+                            const previousClosing = source.lastIndexOf(blockMarker, closing - 1);
+                            if (previousClosing >= 0) firstPosition = previousClosing + blockMarker.length;
+                        }
+                    }
+                }
+                const findStart = position => {
+                    startPattern.lastIndex = position;
+                    const match = startPattern.exec(source);
+                    return match && match.index + match[0].length <= limit ? match : null;
+                };
+                const entries = [];
+                let cursor = firstPosition;
+                let inspected = 0;
+                while (cursor < limit) {
+                    const open = findStart(cursor);
+                    if (!open) break;
+                    if (++inspected > 1000) throw new Error('В посте больше 1000 записей одежды. Уточни метки.');
+                    const afterStart = open.index + open[0].length;
+                    const next = findStart(afterStart);
+                    let rawEnd, matchEnd;
+                    if (endMarker) {
+                        const closeAt = source.indexOf(endMarker, afterStart);
+                        // An unclosed entry cannot capture the next entry or the end of the block.
+                        if (closeAt < 0 || closeAt + endMarker.length > limit || (next && next.index < closeAt)) {
+                            cursor = afterStart;
+                            continue;
+                        }
+                        rawEnd = closeAt;
+                        matchEnd = closeAt + endMarker.length;
+                    } else {
+                        rawEnd = Math.min(next?.index ?? limit, limit);
+                        matchEnd = rawEnd;
+                    }
+                    const name = String(open[1] || '').trim();
+                    if (name) {
+                        // Keep delimiter newlines outside the editable outfit group.
+                        let bodyStart = afterStart;
+                        let bodyEnd = rawEnd;
+                        if (source.slice(bodyStart, bodyStart + 2) === '\r\n') bodyStart += 2;
+                        else if (source[bodyStart] === '\n' || source[bodyStart] === '\r') bodyStart++;
+                        if (source.slice(bodyEnd - 2, bodyEnd) === '\r\n') bodyEnd -= 2;
+                        else if (source[bodyEnd - 1] === '\n' || source[bodyEnd - 1] === '\r') bodyEnd--;
+                        if (bodyEnd < bodyStart) bodyEnd = bodyStart;
+                        entries.push({
+                            index: entries.length,
+                            name,
+                            outfit: source.slice(bodyStart, bodyEnd).trim(),
+                            outfitRange: [bodyStart, bodyEnd],
+                            matchRange: [open.index, matchEnd],
+                        });
+                    }
+                    cursor = Math.max(matchEnd, afterStart);
+                }
+                return entries;
+            };
             const inspectOne = source => {
+                if (rule.mode === 'markers') return inspectMarkers(source);
                 const entries = [];
                 let inspected = 0;
                 for (const match of String(source || '').matchAll(compile(rule))) {
@@ -361,8 +472,8 @@ function wardrobeRegexWorker() {
                     if (!match[0].length) throw new Error('Правило находит пустой текст. Уточни его.');
                     const person = getGroup(match, rule.nameGroup);
                     const outfit = getGroup(match, rule.outfitGroup);
-                    if (person === undefined) throw new Error(`Не найдена группа имени: ${rule.nameGroup}`);
-                    if (outfit === undefined) throw new Error(`Не найдена группа одежды: ${rule.outfitGroup}`);
+                    if (person === undefined) throw new Error('Не найдена группа имени: ' + rule.nameGroup);
+                    if (outfit === undefined) throw new Error('Не найдена группа одежды: ' + rule.outfitGroup);
                     let outfitRange = getIndices(match, rule.outfitGroup);
                     if (!outfitRange) {
                         const first = match[0].indexOf(String(outfit));
@@ -388,9 +499,13 @@ function wardrobeRegexWorker() {
             if (operation === 'scanMany') {
                 const marker = String(closingMarker || rule.closingMarker || '');
                 for (const item of Array.isArray(texts) ? texts : []) {
-                    const hasMarker = marker ? String(item.text || '').includes(marker) : false;
+                    const post = String(item.text || '');
+                    const blockStart = rule.mode === 'markers' ? String(rule.blockStartMarker || '') : '';
+                    const blockOpenPosition = blockStart ? post.lastIndexOf(blockStart) : 0;
+                    if (blockStart && blockOpenPosition < 0) continue;
+                    const hasMarker = marker ? post.indexOf(marker, blockOpenPosition + blockStart.length) >= 0 : false;
                     if (marker && !hasMarker) continue;
-                    const entries = publicEntries(item.text);
+                    const entries = publicEntries(post);
                     if (entries.length || hasMarker) {
                         self.postMessage({ entries, key: item.key, hasMarker });
                         return;
@@ -417,8 +532,11 @@ function wardrobeRegexWorker() {
             if (operation === 'append') {
                 const source = String(text || '');
                 const marker = String(closingMarker || rule.closingMarker || '');
-                const position = marker ? source.lastIndexOf(marker) : -1;
-                if (position < 0) throw new Error('В выбранном посте не найден маркер конца гардероба.');
+                const blockStart = rule.mode === 'markers' ? String(rule.blockStartMarker || '') : '';
+                const blockOpenPosition = blockStart ? source.lastIndexOf(blockStart) : 0;
+                const position = marker && blockOpenPosition >= 0
+                    ? source.indexOf(marker, blockOpenPosition + blockStart.length) : -1;
+                if (position < 0) throw new Error('В выбранном посте не найден конец блока гардероба.');
                 const row = String(entryText || '').trim();
                 if (!row) throw new Error('Шаблон новой строки получился пустым.');
                 const before = source.slice(0, position);
@@ -434,7 +552,7 @@ function wardrobeRegexWorker() {
 }
 
 export async function runWardrobeRegex(payload, timeout = 1500) {
-    if (!payload?.rule?.pattern) throw new Error('Сначала настрой правило поиска гардероба.');
+    if (!payload?.rule || (payload.rule.mode === 'markers' ? !payload.rule.startMarker : !payload.rule.pattern)) throw new Error('Сначала настрой правило поиска гардероба.');
     if (typeof globalThis.Worker !== 'function' || typeof globalThis.Blob !== 'function' || !globalThis.URL?.createObjectURL) {
         throw new Error('Этот браузер не разрешает безопасную проверку правила.');
     }
@@ -458,7 +576,7 @@ export async function runWardrobeRegex(payload, timeout = 1500) {
 
 export async function validateRegexRule(rule) {
     const normalized = normalizeRegexRule(rule);
-    if (!normalized.pattern) throw new Error('Вставь регулярное выражение.');
+    if (normalized.mode === 'regex' && !normalized.pattern) throw new Error('Вставь регулярное выражение.');
     await runWardrobeRegex({ operation: 'validate', rule: normalized });
     return normalized;
 }
