@@ -296,6 +296,18 @@
 .nw-aliases { min-width: 0; }
 .nw-aliases > small { font-size: .86em; }
 .nw-alias-chips { gap: 5px; }
+.nw-alias-chips > .nw-alias-chip.menu_button {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    flex: 0 1 auto !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+}
+.nw-alias-chips > .nw-alias-input {
+    width: 100%;
+    min-width: 0;
+}
 .nw-alias-chip.menu_button { min-height: 28px; padding: 3px 7px !important; }
 .nw-alias-input { min-height: 34px; }
 .nw-settings-list { display: grid; gap: 7px; }
