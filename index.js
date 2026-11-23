@@ -486,7 +486,7 @@ function galleryViewHtml() {
         <div class="nw-filter-label"><span>Персоны и персонажи</span><button class="menu_button nw-clear-filter${ui.subjectFilter ? '' : ' active'}" data-action="clear-subject">Все</button></div>
         <div class="nw-filter-strip" aria-label="Фильтр по персонажам">${subjectFilters || '<small>Создай персону или персонажа в настройках.</small>'}</div>
         <div class="nw-filter-label"><span>Теги</span>${ui.tagFilters.size ? '<button class="menu_button nw-clear-filter" data-action="clear-tags">Сбросить</button>' : ''}</div>
-        <div class="nw-filter-strip" aria-label="Фильтр по тегам">${tags || '<small>Теги пока не созданы.</small>'}</div>
+        <div class="nw-filter-strip nw-tag-filter-strip" aria-label="Фильтр по тегам"><button class="menu_button nw-tag-add" type="button" data-action="new-tag" title="Создать тег" aria-label="Создать тег">+</button>${tags || '<small>Теги пока не созданы.</small>'}</div>
         <div id="nw-gallery-message" class="nw-message" role="status" aria-live="polite">${escapeHtml(ui.status)}</div>
         ${undo ? `<div class="nw-undo">${undo}</div>` : ''}
     </section>
@@ -624,9 +624,10 @@ function captureDraft() {
 function draftTagResultsHtml(query = ui.tagSearch) {
     const needle = comparableName(query);
     const matches = settings.tags.filter(tag => !needle || comparableName(tag.name).includes(needle));
-    if (matches.length) return matches.map(tag => tagChip(tag, ui.draft?.tagIds.includes(tag.id), 'draft-tag')).join('');
-    if (needle) return `<small>Тег «${escapeHtml(normalizeName(query))}» не найден. Нажми Enter, чтобы создать его.</small>`;
-    return '<small>Начни вводить название — первый тег можно создать клавишей Enter.</small>';
+    const plus = '<button class="menu_button nw-tag-add" type="button" data-action="new-draft-tag" title="Создать и выбрать тег" aria-label="Создать и выбрать тег">+</button>';
+    if (matches.length) return plus + matches.map(tag => tagChip(tag, ui.draft?.tagIds.includes(tag.id), 'draft-tag')).join('');
+    if (needle) return plus + `<small>Тег «${escapeHtml(normalizeName(query))}» не найден. Нажми + или Enter, чтобы создать его.</small>`;
+    return plus + '<small>Выбери существующий тег или создай новый кнопкой +.</small>';
 }
 
 function updateDraftTagResults(value) {
@@ -650,7 +651,7 @@ function createViewHtml() {
         <button class="menu_button menu_button_icon nw-main-action" data-action="generate-outfit"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать описание</span></button>
         <div id="nw-generation-status" class="nw-message" role="status" aria-live="polite"></div>
     </section>` : '<p class="nw-help nw-mode-hint">Заполни описание вручную. Оно будет вставляться в найденную группу одежды без дополнительных изменений.</p>';
-    return `<section class="nw-create-head"><div class="nw-create-method"><small>Как подготовить описание</small><div class="nw-mode-switch" role="group" aria-label="Способ создания"><button class="menu_button${ui.createMode === 'write' ? ' active' : ''}" data-action="create-mode" data-mode="write" aria-pressed="${ui.createMode === 'write'}"><i class="fa-solid fa-pen"></i><span>Написать</span></button><button class="menu_button${ui.createMode === 'generate' ? ' active' : ''}" data-action="create-mode" data-mode="generate" aria-pressed="${ui.createMode === 'generate'}"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать</span></button></div></div><button class="menu_button menu_button_icon nw-new-draft" data-action="reset-draft"><i class="fa-solid fa-file-circle-plus"></i><span>Новый черновик</span></button></section>
+    return `<section class="nw-create-head"><div class="nw-create-method"><small>Как подготовить описание</small><div class="nw-mode-switch" role="group" aria-label="Способ создания"><button class="menu_button${ui.createMode === 'write' ? ' active' : ''}" data-action="create-mode" data-mode="write" aria-pressed="${ui.createMode === 'write'}"><i class="fa-solid fa-pen"></i><span>Написать</span></button><button class="menu_button${ui.createMode === 'generate' ? ' active' : ''}" data-action="create-mode" data-mode="generate" aria-pressed="${ui.createMode === 'generate'}"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Сгенерировать</span></button></div></div><button class="menu_button menu_button_icon nw-new-draft" data-action="reset-draft" title="Новый черновик" aria-label="Новый черновик"><i class="fa-solid fa-file-circle-plus"></i><span>Новый черновик</span></button></section>
         ${generate}
         <section class="nw-outfit-form">
             <section class="nw-form-card" aria-labelledby="nw-details-heading"><div class="nw-form-card-head"><div><strong id="nw-details-heading">Детали наряда</strong><small>Персонаж с сайта, полка и описание одежды</small></div></div><div class="nw-site-character-field"><span>Для кого этот наряд</span><div class="nw-field-row"><button class="menu_button nw-character-combo-trigger" data-action="toggle-character-dropdown" aria-expanded="${ui.characterDropdownOpen}"><i class="fa-solid fa-user"></i><span>${escapeHtml(selectedName || 'Выбрать персонажа с сайта…')}</span><i class="fa-solid fa-chevron-down"></i></button><button class="menu_button menu_button_icon" data-action="refresh-site-characters" title="Обновить список с сайта"><i class="fa-solid fa-rotate"></i></button><button class="menu_button menu_button_icon" data-action="quick-subject" title="Создать персонажа на сайте"><i class="fa-solid fa-user-plus"></i><span>Добавить</span></button></div>${ui.characterDropdownOpen ? `<div class="nw-character-menu"><label class="nw-character-search"><i class="fa-solid fa-magnifying-glass"></i><input id="nw-character-search" class="text_pole" type="search" autocomplete="off" placeholder="Поиск по персонажам…" value="${escapeHtml(ui.characterQuery)}"></label><div id="nw-character-options" class="nw-character-options">${characterOptionsHtml()}</div></div>` : ''}<small>${escapeHtml(ui.siteLoadBusy ? 'Загружаю персонажей…' : ui.siteLoadError || (!ui.siteCharacters.length ? 'На сайте пока нет персонажей.' : 'Список загружен с сайта.'))}</small></div><label><span>Полка на сайте</span><input id="nw-outfit-shelf" class="text_pole" maxlength="120" list="nw-site-shelves" placeholder="Существующая или новая полка" value="${escapeHtml(draft.shelfName || '')}"><datalist id="nw-site-shelves">${shelfOptions}</datalist></label>${inlineSubjectCreatorHtml()}<label><span>Описание одежды</span><textarea id="nw-outfit-description" class="text_pole" rows="5" maxlength="12000" placeholder="Текст, который будет вставлен в пост">${escapeHtml(draft.description)}</textarea></label></section>
@@ -1817,6 +1818,7 @@ function bindEvents() {
     $(document).on(`click${NS}`, '[data-action="quick-subject"]', () => openInlineSubjectCreator('character', true));
     $(document).on(`click${NS}`, '[data-action="new-subject"]', function () { openInlineSubjectCreator(this.dataset.type, ui.view === 'create'); });
     $(document).on(`click${NS}`, '[data-action="new-tag"]', () => void openTagCreatorPopup('', false));
+    $(document).on(`click${NS}`, '[data-action="new-draft-tag"]', () => void openTagCreatorPopup(ui.tagSearch, true));
     $(document).on(`click${NS}`, '[data-action="cancel-inline-subject"]', () => { captureDraft(); ui.subjectCreator = null; render(); });
     $(document).on(`click${NS}`, '[data-action="create-inline-subject"]', createInlineSubject);
     $(document).on(`keydown${NS}`, '#nw-inline-alias-input', function (event) { if (event.key !== 'Enter') return; event.preventDefault(); captureDraft(); const alias = normalizeName(this.value); const editor = ui.subjectCreator; if (!editor || !alias || editor.aliases.some(item => comparableName(item) === comparableName(alias))) return; editor.aliases.push(alias); render(); });
